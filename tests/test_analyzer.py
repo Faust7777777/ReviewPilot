@@ -9,6 +9,11 @@ def test_build_prompt_includes_intent_and_diff():
     assert "fix login" in p and "login times out" in p and "+x" in p
 
 
+def test_build_prompt_enforces_evidence_and_low_risk_guidance():
+    p = build_prompt(diff="d", title="t", body="b", issue=None)
+    assert "证据是强制的" in p and "新增测试" in p
+
+
 def test_parse_findings_reads_json_array():
     raw = json.dumps([
         {"kind": "intent_mismatch", "title": "夹带改动", "file": "pay.py",
