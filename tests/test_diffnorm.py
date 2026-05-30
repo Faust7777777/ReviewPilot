@@ -46,3 +46,19 @@ def test_split_diff_by_file_separates_each_file():
 
 def test_split_diff_empty_returns_empty():
     assert split_diff_by_file("") == []
+
+
+def test_split_extracts_filename_for_deleted_binary_file():
+    # 删除/二进制文件没有 +++ b/ 行,此前文件名为空 → 过滤(node_modules)会漏
+    diff = ("diff --git a/node_modules/.bin/pbjs b/node_modules/.bin/pbjs\n"
+            "deleted file mode 100755\n"
+            "Binary files a/node_modules/.bin/pbjs and /dev/null differ\n")
+    blocks = split_diff_by_file(diff)
+    assert blocks[0][0] == "node_modules/.bin/pbjs"
+
+
+def test_split_uses_new_path_for_rename():
+    diff = ("diff --git a/old.py b/new.py\nsimilarity index 95%\n"
+            "rename from old.py\nrename to new.py\n")
+    blocks = split_diff_by_file(diff)
+    assert blocks[0][0] == "new.py"
