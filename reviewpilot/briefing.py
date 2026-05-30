@@ -26,6 +26,8 @@ def _render_finding(f: Finding) -> str:
 
 def render_briefing(b: Briefing) -> str:
     lines = [f"# ReviewPilot — {b.pr_ref}", ""]
+    if b.summary:
+        lines += ["## 结论", b.summary, ""]
     for kind, title in _KIND_TITLE.items():
         group = [f for f in b.findings if f.kind.value == kind]
         if not group:
@@ -33,6 +35,14 @@ def render_briefing(b: Briefing) -> str:
         lines.append(f"## {title}")
         lines.extend(_render_finding(f) for f in group)
         lines.append("")
-    if len(lines) == 2:
+    if b.inspected:
+        lines.append("## 我检查了什么")
+        lines += [f"- {c.dimension}:{c.note}" for c in b.inspected]
+        lines.append("")
+    if b.limitations:
+        lines.append("## 限制")
+        lines += [f"- {x}" for x in b.limitations]
+        lines.append("")
+    if not b.summary and not b.findings and not b.inspected:
         lines.append("未发现高置信问题。")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip() + "\n"
