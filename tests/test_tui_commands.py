@@ -20,10 +20,7 @@ def _run(coro):
 
 
 def _log_text(app):
-    return "\n".join(
-        getattr(widget, "source", "") or getattr(widget, "_initial_markdown", "")
-        for widget in app.query("Markdown")
-    )
+    return "\n".join(app.transcript)
 
 
 def test_help_command_lists_commands_without_starting_analysis():

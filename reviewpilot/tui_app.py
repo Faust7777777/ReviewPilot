@@ -46,6 +46,7 @@ class ReviewPilotApp(App):
         self._last_persist_error = None
         self._persistence_disabled = False
         self._busy = False
+        self.transcript: list[str] = []  # 渲染过的消息文本(便于测试/检索)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -63,9 +64,17 @@ class ReviewPilotApp(App):
 
     # —— 三类消息 ——
     async def _mount(self, label: str, text: str, css: str) -> None:
+        self.transcript.append(f"{label}\n{text}")
         log = self.query_one("#log", VerticalScroll)
-        await log.mount(Markdown(f"**{label}**\n\n{text}", classes=css))
+        # open_links=False:点击链接不调系统浏览器(WSL 无浏览器会刷屏 xdg-open)
+        await log.mount(Markdown(f"**{label}**\n\n{text}", classes=css, open_links=False))
         log.scroll_end(animate=False)
+
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        # 不打开浏览器,改为把链接填进输入框:点 PR 链接 → 回车即评审
+        inp = self.query_one("#ask", Input)
+        inp.value = event.href
+        inp.focus()
 
     async def _user(self, text: str) -> None:       # 用户消息
         await self._mount("你", text, "msg-user")
