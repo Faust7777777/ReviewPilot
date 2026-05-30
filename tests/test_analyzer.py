@@ -100,3 +100,23 @@ def test_analyze_chunked_caps_file_count():
                     max_chars=120, max_files=5)
     joined = "\n".join(calls)
     assert "f0.py" in joined and "f10.py" not in joined   # 只分析前 5 个
+
+
+def test_should_skip_vendored_and_generated_dirs():
+    from reviewpilot.analyzer import _should_skip
+    assert _should_skip("node_modules/.bin/pbjs", "+x\n", 12000)
+    assert _should_skip("cloudfunctions/x/node_modules/.bin/pbjs.cmd", "+x\n", 12000)
+    assert _should_skip("frontend/dist/bundle.js", "+x\n", 12000)
+    assert not _should_skip("src/app.py", "+x\n", 12000)
+
+
+def test_analyze_chunked_ranks_source_over_config_when_capped():
+    diff = ("diff --git a/config.json b/config.json\n--- a/config.json\n+++ b/config.json\n"
+            "@@ -1 +1 @@\n+{}\n"
+            "diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n"
+            "@@ -1 +1 @@\n+code\n")
+    calls = []
+    stub = lambda p: calls.append(p) or "[]"
+    from reviewpilot.analyzer import analyze_chunked
+    analyze_chunked(diff, "t", "b", None, llm=stub, max_chars=10, max_files=1)
+    assert "main.py" in calls[0] and "config.json" not in calls[0]   # 源码优先
