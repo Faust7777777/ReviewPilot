@@ -53,6 +53,12 @@ def test_rates_aggregate_correctly():
     assert "误报率" in res.summary()
 
 
+def test_rates_are_none_when_label_absent():
+    res = evaluate([_clean("c1"), _clean("c2")], llm=lambda p: _SUMMARY_ONLY)
+    assert res.fn_rate is None and res.fp_rate == 0.0
+    assert "N/A" in res.summary()
+
+
 def test_load_samples_roundtrip(tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps([{"name": "x", "title": "t", "diff": "d", "label": "clean"}]))

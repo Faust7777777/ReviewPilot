@@ -15,7 +15,7 @@ def _default_runner(args: list[str]) -> str:
     return subprocess.run(args, capture_output=True, text=True, check=True).stdout
 
 def _parse_ref(url: str) -> str:
-    m = re.search(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)", url)
+    m = re.search(r"github\.com/([^/]+)/(.+?)(?:\.git)?/pull/(\d+)(?:[/?#]|$)", url)
     if not m:
         raise ValueError(f"not a PR url: {url}")
     return f"{m.group(1)}/{m.group(2)}#{m.group(3)}"

@@ -114,7 +114,9 @@ def create_app(briefing_fn=None):
         return render_page()
 
     @app.post("/review", response_class=HTMLResponse)
-    def review(pr_url: str = Form(...)):
+    def review(pr_url: str = Form("")):
+        if not pr_url.strip():
+            return render_page("", '<div class="err">请填写 PR 链接。</div>')
         try:
             briefing = briefing_fn(pr_url)
             return render_page(pr_url, render_briefing_html(briefing))

@@ -27,3 +27,13 @@ def test_analyze_uses_injected_llm():
     stub = lambda prompt: '[{"kind":"summary","title":"changed add()"}]'
     fs = analyze(diff="d", title="t", body="b", issue=None, llm=stub)
     assert fs[0].title == "changed add()"
+
+
+def test_parse_findings_ignores_bracket_prefix_text():
+    raw = '见 [备注] 如下:\n[{"kind":"risk","title":"t","evidence":"f:1"}]'
+    fs = parse_findings(raw)
+    assert len(fs) == 1 and fs[0].title == "t"
+
+
+def test_parse_findings_returns_empty_on_non_list_json():
+    assert parse_findings('{"kind":"risk","title":"t"}') == []
