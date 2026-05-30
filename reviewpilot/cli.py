@@ -74,6 +74,35 @@ def _pr_from_args(args):
     return fetch_pr(args.pr_url)
 
 
+def _run_chat_ui(pr) -> None:
+    """tty 下启全屏 textual TUI;否则回退普通多轮循环(管道/CI/测试)。
+    briefing 与 session 只构建一次,两条路径复用。"""
+    import sys
+    print("正在分析 PR…")
+    briefing_text = render_briefing(build_briefing_for(pr))
+    session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
+    if sys.stdin.isatty():
+        try:
+            from reviewpilot.tui_app import ReviewPilotApp
+            ReviewPilotApp(briefing_text, session).run()
+            return
+        except Exception as exc:  # TUI 不可用则降级,不让用户卡死
+            print(f"(全屏 TUI 不可用,回退普通模式:{exc})")
+    # 普通多轮(非 tty 或 TUI 失败):复用已建 session
+    print(briefing_text)
+    print("\n— 多轮追问(输入 q / quit 退出)—")
+    ask = make_tui_input()
+    while True:
+        try:
+            q = ask("\n> ")
+        except EOFError:
+            break
+        if q.strip().lower() in {"q", "quit", "exit"}:
+            break
+        if q.strip():
+            print(session.ask(q))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="reviewpilot")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -87,7 +116,7 @@ def main(argv=None):
         if args.cmd == "review":
             print(render_briefing(build_briefing_for(_pr_from_args(args))))
         elif args.cmd == "chat":
-            run_chat(pr=_pr_from_args(args), input_fn=make_tui_input())
+            _run_chat_ui(_pr_from_args(args))
         elif args.cmd == "eval":
             from reviewpilot.evaluate import load_samples, evaluate
             result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
