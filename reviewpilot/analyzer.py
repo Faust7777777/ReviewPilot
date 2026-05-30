@@ -71,13 +71,32 @@ def analyze(diff, title, body, issue, llm) -> list[Finding]:
     return parse_findings(llm(build_prompt(diff, title, body, issue)))
 
 
-def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000) -> list[Finding]:
-    """大 PR 分块:diff 超过 max_chars 时按文件拆分逐块分析再合并,
-    避免单次塞入超长 diff(扣题面"上下文/响应速度")。小 PR 走单次调用。"""
+# 生成类/二进制文件:不值得逐行审,且会拖垮分析(如 40KB 的 svg、lock 文件)
+_SKIP_SUFFIXES = (".svg", ".map", ".min.js", ".min.css", ".png", ".jpg", ".jpeg",
+                  ".gif", ".pdf", ".ico", ".woff", ".woff2", ".lock")
+
+
+def _should_skip(fname: str, file_diff: str, max_file_chars: int) -> bool:
+    low = fname.lower()
+    if any(low.endswith(s) for s in _SKIP_SUFFIXES):
+        return True
+    if "lock" in low and low.endswith((".json", ".yaml", ".yml", ".toml")):
+        return True  # package-lock.json / poetry.lock 之类
+    if len(file_diff) > max_file_chars:
+        return True  # 单文件 diff 过大,跳过以保证响应速度
+    return False
+
+
+def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000,
+                    max_file_chars: int = 12000) -> list[Finding]:
+    """大 PR 分块:diff 超过 max_chars 时按文件拆分逐块分析再合并;
+    跳过生成类/二进制/超大文件(保证响应速度)。小 PR 走单次调用。"""
     if len(diff) <= max_chars:
         return analyze(diff, title, body, issue, llm)
     from reviewpilot.diffnorm import split_diff_by_file
     findings: list[Finding] = []
-    for _fname, file_diff in split_diff_by_file(diff):
+    for fname, file_diff in split_diff_by_file(diff):
+        if _should_skip(fname, file_diff, max_file_chars):
+            continue
         findings.extend(analyze(file_diff, title, body, issue, llm))
     return findings

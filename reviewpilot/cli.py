@@ -75,20 +75,28 @@ def _pr_from_args(args):
 
 
 def _run_chat_ui(pr) -> None:
-    """tty 下启全屏 textual TUI;否则回退普通多轮循环(管道/CI/测试)。
-    briefing 与 session 只构建一次,两条路径复用。"""
+    """tty 下启全屏 textual TUI(界面先起、分析在后台);否则回退普通多轮。"""
     import sys
-    print("正在分析 PR…")
-    briefing_text = render_briefing(build_briefing_for(pr))
-    session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
+
+    def prepare():
+        briefing_text = render_briefing(build_briefing_for(pr))
+        session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
+        return briefing_text, session
+
     if sys.stdin.isatty():
         try:
             from reviewpilot.tui_app import ReviewPilotApp
-            ReviewPilotApp(briefing_text, session).run()
+            ReviewPilotApp(prepare).run()
             return
         except Exception as exc:  # TUI 不可用则降级,不让用户卡死
             print(f"(全屏 TUI 不可用,回退普通模式:{exc})")
-    # 普通多轮(非 tty 或 TUI 失败):复用已建 session
+    # 普通多轮(非 tty 或 TUI 失败)
+    print("正在分析 PR…")
+    try:
+        briefing_text, session = prepare()
+    except Exception as exc:  # LLM/网络/鉴权失败:给提示而非 traceback
+        print(f"⚠️  分析失败:{exc}")
+        return
     print(briefing_text)
     print("\n— 多轮追问(输入 q / quit 退出)—")
     ask = make_tui_input()
