@@ -61,3 +61,16 @@ def test_analyze_chunked_splits_per_file_over_threshold():
     findings = analyze_chunked(big, "t", "b", None, llm=stub, max_chars=10)
     assert len(calls) == 2          # 按文件拆成 2 次调用
     assert len(findings) == 2       # 合并两块的 findings
+
+
+def test_analyze_chunked_skips_generated_and_oversized_files():
+    big_svg = "x" * 200
+    diff = (f"diff --git a/pic.svg b/pic.svg\n--- a/pic.svg\n+++ b/pic.svg\n@@ -1 +1 @@\n+{big_svg}\n"
+            "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n+code\n")
+    calls = []
+    stub = lambda p: calls.append(p) or '[{"kind":"summary","title":"s"}]'
+    from reviewpilot.analyzer import analyze_chunked
+    analyze_chunked(diff, "t", "b", None, llm=stub, max_chars=10, max_file_chars=120)
+    # svg 被跳过(.svg 后缀);a.py 仍分析 → 仅 1 次调用
+    assert len(calls) == 1
+    assert "pic.svg" not in calls[0]
