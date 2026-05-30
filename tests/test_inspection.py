@@ -26,3 +26,17 @@ def test_findings_reflected_in_summary_and_dimensions():
     assert "发现 1 条" in summary
     risk_dim = next(c for c in inspected if c.dimension == "边界/逻辑风险")
     assert "发现 1 处" in risk_dim.note
+
+
+def test_inspection_flags_oversized_change_honestly():
+    big = "".join(
+        f"diff --git a/f{i}.py b/f{i}.py\n--- a/f{i}.py\n+++ b/f{i}.py\n@@ -1 +1 @@\n+x{i}\n"
+        for i in range(45)
+    )
+    _summary, _inspected, limitations = build_inspection(big, [])
+    assert any("超出一次可信完整评审" in x for x in limitations)
+
+
+def test_inspection_small_change_has_no_oversized_note():
+    _summary, _inspected, limitations = build_inspection(DIFF, [])
+    assert not any("超出一次可信" in x for x in limitations)
