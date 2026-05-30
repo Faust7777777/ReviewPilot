@@ -25,6 +25,9 @@ export RP_MODEL=deepseek/deepseek-v4-flash   # 可选,默认即此
 # 命令行:对一个 PR 出 briefing
 reviewpilot review https://github.com/owner/repo/pull/123
 
+# 多轮对话评审:出 briefing 后可继续追问 / 反驳(输入 q 退出)
+reviewpilot chat https://github.com/owner/repo/pull/123
+
 # 网页 GUI:填 PR 链接 → 渲染 briefing
 uvicorn reviewpilot.web:app --port 8848      # 打开 http://localhost:8848
 ```
@@ -92,7 +95,7 @@ reviewpilot eval evalset/samples.json --no-guard # 对照
 ## 未来扩展
 
 - 跨 PR / 跨仓库的持久化评审记忆与依赖图(避免重复指正)。
-- Aider 驱动的仓库级上下文检索(RepoMap)+ 多轮对话追问。
+- Aider 驱动的仓库级上下文检索(RepoMap):让对话能按需读取调用方/相关文件(当前 `chat` 多轮对话已就绪,但上下文限于 PR diff)。
 - 评测发现的改进:强制每条 finding 带行号证据、护栏按 kind 分级、模型分层降延迟(详见 RESULTS.md)。
 - 扩充评测集、模型/上下文策略的对照数据。
 - 自动行级评论回写、CI 集成。
