@@ -87,11 +87,28 @@ def _should_skip(fname: str, file_diff: str, max_file_chars: int) -> bool:
     return False
 
 
+def _pack(blocks: list[tuple[str, str]], max_chars: int) -> list[list[tuple[str, str]]]:
+    """把多个文件按字符预算打包成几批,每批 ≤ max_chars(单文件超限自成一批)。"""
+    batches: list[list[tuple[str, str]]] = []
+    cur: list[tuple[str, str]] = []
+    cur_len = 0
+    for f, d in blocks:
+        if cur and cur_len + len(d) > max_chars:
+            batches.append(cur)
+            cur, cur_len = [], 0
+        cur.append((f, d))
+        cur_len += len(d)
+    if cur:
+        batches.append(cur)
+    return batches
+
+
 def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000,
-                    max_file_chars: int = 12000, on_progress=None) -> list[Finding]:
-    """大 PR 分块:diff 超过 max_chars 时按文件拆分逐块分析再合并;
-    跳过生成类/二进制/超大文件(保证响应速度)。小 PR 走单次调用。
-    on_progress(msg) 可选:逐步回报进度(供 TUI 实时展示"在分析什么")。"""
+                    max_file_chars: int = 12000, max_files: int = 40,
+                    on_progress=None) -> list[Finding]:
+    """大 PR 分块:diff 超过 max_chars 时按文件拆分,**按预算打包成几批**(而非逐文件一次调用)
+    再合并;跳过生成类/二进制/超大文件;文件过多则只分析前 max_files 个。小 PR 走单次调用。
+    on_progress(msg) 可选:逐步回报进度。"""
     if len(diff) <= max_chars:
         if on_progress:
             on_progress("分析改动…")
@@ -99,9 +116,17 @@ def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000,
     from reviewpilot.diffnorm import split_diff_by_file
     blocks = [(f, d) for f, d in split_diff_by_file(diff)
               if not _should_skip(f, d, max_file_chars)]
-    findings: list[Finding] = []
-    for i, (fname, file_diff) in enumerate(blocks, 1):
+    if len(blocks) > max_files:
         if on_progress:
-            on_progress(f"分析 {fname or '改动'} ({i}/{len(blocks)})…")
-        findings.extend(analyze(file_diff, title, body, issue, llm))
+            on_progress(f"改动文件过多({len(blocks)} 个),仅分析前 {max_files} 个。")
+        blocks = blocks[:max_files]
+    batches = _pack(blocks, max_chars)
+    findings: list[Finding] = []
+    for i, batch in enumerate(batches, 1):
+        if on_progress:
+            names = ", ".join(f or "改动" for f, _d in batch[:3])
+            more = "…" if len(batch) > 3 else ""
+            on_progress(f"分析第 {i}/{len(batches)} 批({len(batch)} 文件:{names}{more})…")
+        joined = "\n".join(d for _f, d in batch)
+        findings.extend(analyze(joined, title, body, issue, llm))
     return findings

@@ -116,7 +116,11 @@ def fetch_repo_latest(repo: str, runner=_default_runner) -> PRData:
         filename = item.get("filename", "")
         if not patch or not filename:
             continue
-        blocks.append(f"diff --git a/{filename} b/{filename}\n{patch}")
+        # 补 ---/+++ 头,让下游按文件名解析(否则文件名为空、显示"改动")
+        blocks.append(
+            f"diff --git a/{filename} b/{filename}\n"
+            f"--- a/{filename}\n+++ b/{filename}\n{patch}"
+        )
 
     title = message.splitlines()[0] if message else ""
     return PRData(
