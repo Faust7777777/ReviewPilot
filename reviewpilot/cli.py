@@ -9,6 +9,7 @@ from reviewpilot.models import Briefing
 from reviewpilot.llm import complete, chat
 from reviewpilot.chat import ChatSession
 from reviewpilot.inspection import build_inspection
+from reviewpilot.tui import make_tui_input
 
 # 各阶段默认 LLM(可经 RP_MODEL_<STAGE> 分别指定模型)
 _ANALYZE_LLM = partial(complete, stage="analyze")
@@ -86,7 +87,7 @@ def main(argv=None):
         if args.cmd == "review":
             print(render_briefing(build_briefing_for(_pr_from_args(args))))
         elif args.cmd == "chat":
-            run_chat(pr=_pr_from_args(args))
+            run_chat(pr=_pr_from_args(args), input_fn=make_tui_input())
         elif args.cmd == "eval":
             from reviewpilot.evaluate import load_samples, evaluate
             result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
