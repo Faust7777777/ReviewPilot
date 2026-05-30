@@ -78,11 +78,23 @@ pip install -e ".[dev]"
 pytest -q          # 全程注入式 stub,无需网络/密钥
 ```
 
+## 评测(sanity eval)
+
+小样本评测集(`evalset/samples.json`,含 negative 样本)+ `reviewpilot eval` 子命令,量化误报/漏报:
+
+```bash
+reviewpilot eval evalset/samples.json            # 护栏开
+reviewpilot eval evalset/samples.json --no-guard # 对照
+```
+
+一次真实结果(DeepSeek,8 样本)与**诚实分析**(含证据门过严导致的漏报、改进项)见 [`evalset/RESULTS.md`](evalset/RESULTS.md)。结论方向性,非基准证明。
+
 ## 未来扩展
 
 - 跨 PR / 跨仓库的持久化评审记忆与依赖图(避免重复指正)。
 - Aider 驱动的仓库级上下文检索(RepoMap)+ 多轮对话追问。
-- 误报/漏报小样本评测集(含 negative 样本)与 `reviewpilot eval` 子命令;模型/上下文策略的对照数据。
+- 评测发现的改进:强制每条 finding 带行号证据、护栏按 kind 分级、模型分层降延迟(详见 RESULTS.md)。
+- 扩充评测集、模型/上下文策略的对照数据。
 - 自动行级评论回写、CI 集成。
 
 ## 许可证
