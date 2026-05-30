@@ -8,6 +8,7 @@ from reviewpilot.briefing import render_briefing
 from reviewpilot.models import Briefing
 from reviewpilot.llm import complete, chat
 from reviewpilot.chat import ChatSession
+from reviewpilot.inspection import build_inspection
 
 # 各阶段默认 LLM(可经 RP_MODEL_<STAGE> 分别指定模型)
 _ANALYZE_LLM = partial(complete, stage="analyze")
@@ -18,7 +19,9 @@ _EVAL_LLM = partial(complete, stage="eval")
 def build_briefing_for(pr, llm=_ANALYZE_LLM) -> Briefing:
     findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
     findings = apply_guardrail(findings, diff=pr.diff)
-    return Briefing(pr_ref=pr.pr_ref, findings=findings)
+    summary, inspected, limitations = build_inspection(pr.diff, findings)
+    return Briefing(pr_ref=pr.pr_ref, findings=findings,
+                    summary=summary, inspected=inspected, limitations=limitations)
 
 
 def build_briefing(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> Briefing:

@@ -1,0 +1,34 @@
+"""确定性生成"我检查了什么"——补"诚实评审"的信任缺口。
+
+即使没找到问题,也如实交代:看了多少改动、检查了哪些维度、为何判定无高置信问题、
+以及能力边界。内容由 diff 与 findings 推导(不是模型自由发挥),固定维度、避免噪声。
+"""
+from reviewpilot.diffnorm import parse_unified_diff, split_diff_by_file
+from reviewpilot.models import Finding, FindingKind, InspectionCheck
+
+_LIMITATIONS = ["仅基于 PR 描述与 diff", "未运行测试", "未读取完整仓库上下文"]
+
+
+def build_inspection(diff: str, findings: list[Finding]) -> tuple[str, list[InspectionCheck], list[str]]:
+    files = [f for f, _ in split_diff_by_file(diff) if f]
+    hunks = parse_unified_diff(diff)
+    n_intent = sum(f.kind == FindingKind.INTENT_MISMATCH for f in findings)
+    n_risk = sum(f.kind == FindingKind.RISK for f in findings)
+
+    inspected = [
+        InspectionCheck(dimension="变更范围", note=f"{len(files)} 个文件,{len(hunks)} 个 hunk"),
+        InspectionCheck(dimension="意图一致性",
+                        note=f"发现 {n_intent} 处声明外/不符" if n_intent else "未发现声明外改动"),
+        InspectionCheck(dimension="边界/逻辑风险",
+                        note=f"发现 {n_risk} 处" if n_risk else "未发现可由 diff 直接证明的问题"),
+        InspectionCheck(dimension="测试缺口",
+                        status="needs_context",
+                        note="见风险项" if n_risk else "未发现明确缺失;充分性需结合测试策略"),
+        InspectionCheck(dimension="接口影响",
+                        note="见风险项" if n_risk else "未发现签名/调用约定变化"),
+    ]
+    if findings:
+        summary = f"发现 {len(findings)} 条可报告项(见下);其余维度已检查。"
+    else:
+        summary = "未发现高置信问题——以下维度均已检查,无可由 diff 直接证明的问题。"
+    return summary, inspected, _LIMITATIONS

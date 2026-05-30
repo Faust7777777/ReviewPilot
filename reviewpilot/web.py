@@ -82,6 +82,9 @@ def _card(f: Finding) -> str:
 
 def render_briefing_html(b: Briefing) -> str:
     blocks = [f'<div class="ref">{html.escape(b.pr_ref)}</div>']
+    if b.summary:
+        blocks.append(f'<div class="group"><h2>结论</h2>'
+                      f'<div class="card">{html.escape(b.summary)}</div></div>')
     any_group = False
     for kind, title in _KIND_TITLE.items():
         group = [f for f in b.findings if f.kind.value == kind]
@@ -90,7 +93,15 @@ def render_briefing_html(b: Briefing) -> str:
         any_group = True
         cards = "".join(_card(f) for f in group)
         blocks.append(f'<div class="group"><h2>{title}</h2>{cards}</div>')
-    if not any_group:
+    if b.inspected:
+        items = "".join(
+            f'<div class="meta">{html.escape(c.dimension)}:{html.escape(c.note)}</div>'
+            for c in b.inspected)
+        blocks.append(f'<div class="group"><h2>我检查了什么</h2><div class="card">{items}</div></div>')
+    if b.limitations:
+        items = "".join(f'<div class="meta">{html.escape(x)}</div>' for x in b.limitations)
+        blocks.append(f'<div class="group"><h2>限制</h2><div class="card">{items}</div></div>')
+    if not any_group and not b.summary and not b.inspected:
         blocks.append('<p class="empty">未发现高置信问题。</p>')
     return "\n".join(blocks)
 

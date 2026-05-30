@@ -26,6 +26,15 @@ class Finding(BaseModel):
     needs_human: bool = False
 
 
+class InspectionCheck(BaseModel):
+    dimension: str
+    status: str = "checked"   # checked | not_applicable | needs_context
+    note: str = ""
+
+
 class Briefing(BaseModel):
     pr_ref: str
     findings: list[Finding] = []
+    summary: str = ""
+    inspected: list[InspectionCheck] = []
+    limitations: list[str] = []
