@@ -2,6 +2,9 @@ import re
 from dataclasses import dataclass, field
 
 _FILE_RE = re.compile(r"^\+\+\+ b/(.+)$")
+# diff --git a/old b/new:删除(+++ /dev/null)、重命名、二进制文件都没有 +++ b/ 行,
+# 但这行总有,从中取文件名(新路径优先),保证过滤/展示拿得到文件名。
+_GIT_HDR_RE = re.compile(r"^diff --git a/.+ b/(.+)$")
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 @dataclass
@@ -19,7 +22,9 @@ def split_diff_by_file(diff_text: str) -> list[tuple[str, str]]:
         if line.startswith("diff --git "):
             if cur is not None:
                 blocks.append((cur["file"], "\n".join(cur["lines"])))
-            cur = {"file": "", "lines": [line]}
+            m_hdr = _GIT_HDR_RE.match(line)
+            # 先从 diff --git 头取名(删除/重命名/二进制也有名);+++ b/ 行后续会覆盖
+            cur = {"file": m_hdr.group(1) if m_hdr else "", "lines": [line]}
             continue
         if cur is None:
             cur = {"file": "", "lines": []}
