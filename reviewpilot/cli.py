@@ -99,14 +99,36 @@ def _analyze_to_session(pr, on_progress=None):
     return briefing_text, session
 
 
+class _ChatServices:
+    """TUI 的目标解析能力:确定性解析 + repo 列 PR + 模糊→大模型解析候选(待用户确认)。"""
+
+    def interpret(self, text):
+        from reviewpilot.resolve import interpret_target
+        return interpret_target(text, llm=_CHAT_LLM)
+
+    def pr_data(self, ref):
+        return fetch_pr(ref)
+
+    def local_data(self, text):
+        return resolve_pr_text(text)
+
+    def list_prs(self, repo):
+        from reviewpilot.prfetch import list_open_prs
+        return list_open_prs(repo)
+
+    def repo_latest(self, repo):
+        from reviewpilot.prfetch import fetch_repo_latest
+        return fetch_repo_latest(repo)
+
+
 def _run_chat_ui(initial: str = None) -> None:
-    """tty 下启全屏 TUI(先进界面、再在里面给 PR、看分析过程);否则回退普通多轮。
-    initial:可选的初始 PR 文本(命令行传了 PR/--local 时自动开跑)。"""
+    """tty 下启全屏 TUI(先进界面、再在里面给 PR/repo,看分析过程);否则回退普通多轮。
+    initial:可选的初始文本(命令行传了 PR/repo/--local 时自动开跑)。"""
     import sys
     if sys.stdin.isatty():
         try:
             from reviewpilot.tui_app import ReviewPilotApp
-            ReviewPilotApp(resolve_pr_text, _analyze_to_session, initial=initial).run()
+            ReviewPilotApp(_ChatServices(), _analyze_to_session, initial=initial).run()
             return
         except Exception as exc:  # TUI 不可用则降级
             print(f"(全屏 TUI 不可用,回退普通模式:{exc})")

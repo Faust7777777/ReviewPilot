@@ -29,6 +29,29 @@ def _parse_ref(url: str) -> str:
     return f"{m.group(1)}/{m.group(2)}#{m.group(3)}"
 
 
+def parse_repo(text: str) -> str:
+    s = (text or "").strip()
+    bare = re.fullmatch(r"([\w.-]+)/([\w.-]+)", s)
+    if bare:
+        return f"{bare.group(1)}/{bare.group(2)}"
+
+    m = re.search(r"github\.com/([^/\s]+)/([^/\s?#]+)", s)
+    if m:
+        owner = m.group(1)
+        repo = re.sub(r"\.git$", "", m.group(2))
+        if repo and repo not in {"pull", "pulls"}:
+            return f"{owner}/{repo}"
+
+    raise PRFetchError(f"无法识别的仓库:{text}")
+
+
+def is_pr_url(text: str) -> bool:
+    s = (text or "").strip()
+    if re.search(r"github\.com/[^/\s]+/[^/\s?#]+(?:\.git)?/pull/\d+(?:[/?#]|$)", s):
+        return True
+    return re.fullmatch(r"[\w.-]+/[\w.-]+#\d+", s) is not None
+
+
 def _classify_gh_error(stderr: str) -> str:
     s = (stderr or "").lower()
     if "not logged" in s or "authentication" in s:
@@ -53,6 +76,55 @@ def fetch_pr(url: str, runner=_default_runner) -> PRData:
         raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
     return PRData(pr_ref=pr_ref, title=meta.get("title", ""),
                   body=meta.get("body", ""), diff=diff)
+
+
+def list_open_prs(repo: str, runner=_default_runner) -> list[dict]:
+    try:
+        raw = runner([
+            "gh", "pr", "list", "-R", repo, "--state", "open",
+            "-L", "30", "--json", "number,title,author",
+        ])
+    except subprocess.CalledProcessError as exc:
+        raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
+
+    prs = json.loads(raw)
+    return [
+        {
+            "number": item.get("number"),
+            "title": item.get("title", ""),
+            "author": (item.get("author") or {}).get("login", ""),
+        }
+        for item in prs
+    ]
+
+
+def fetch_repo_latest(repo: str, runner=_default_runner) -> PRData:
+    try:
+        commits = json.loads(runner(["gh", "api", f"repos/{repo}/commits?per_page=1"]))
+        if not commits:
+            raise PRFetchError(f"仓库没有可评审的提交:{repo}")
+        latest = commits[0]
+        sha = latest.get("sha", "")
+        message = (latest.get("commit") or {}).get("message", "")
+        detail = json.loads(runner(["gh", "api", f"repos/{repo}/commits/{sha}"]))
+    except subprocess.CalledProcessError as exc:
+        raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
+
+    blocks = []
+    for item in detail.get("files", []):
+        patch = item.get("patch")
+        filename = item.get("filename", "")
+        if not patch or not filename:
+            continue
+        blocks.append(f"diff --git a/{filename} b/{filename}\n{patch}")
+
+    title = message.splitlines()[0] if message else ""
+    return PRData(
+        pr_ref=f"{repo}@{sha[:7]}",
+        title=title,
+        body="",
+        diff="\n".join(blocks),
+    )
 
 
 def fetch_local(staged: bool = False, diff_range: str | None = None,
