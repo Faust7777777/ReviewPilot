@@ -10,6 +10,28 @@ class Hunk:
     new_start: int
     lines: list[str] = field(default_factory=list)
 
+def split_diff_by_file(diff_text: str) -> list[tuple[str, str]]:
+    """把一个多文件 diff 拆成 [(file, 该文件的 diff 文本)]。用于大 PR 分块分析。
+    以 `diff --git ` 为文件边界;无该头时整体作为单块。"""
+    blocks: list[tuple[str, str]] = []
+    cur: dict | None = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            if cur is not None:
+                blocks.append((cur["file"], "\n".join(cur["lines"])))
+            cur = {"file": "", "lines": [line]}
+            continue
+        if cur is None:
+            cur = {"file": "", "lines": []}
+        cur["lines"].append(line)
+        m = _FILE_RE.match(line)
+        if m:
+            cur["file"] = m.group(1)
+    if cur is not None:
+        blocks.append((cur["file"], "\n".join(cur["lines"])))
+    return blocks
+
+
 def parse_unified_diff(diff_text: str) -> list[Hunk]:
     hunks: list[Hunk] = []
     cur_file: str | None = None
