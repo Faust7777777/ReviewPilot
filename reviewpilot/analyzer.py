@@ -74,10 +74,22 @@ def analyze(diff, title, body, issue, llm) -> list[Finding]:
 # 生成类/二进制文件:不值得逐行审,且会拖垮分析(如 40KB 的 svg、lock 文件)
 _SKIP_SUFFIXES = (".svg", ".map", ".min.js", ".min.css", ".png", ".jpg", ".jpeg",
                   ".gif", ".pdf", ".ico", ".woff", ".woff2", ".lock")
+# vendored/生成目录:整段排除(node_modules/.bin/pbjs 这类根本不该审)
+_SKIP_DIR_SEGMENTS = frozenset({
+    "node_modules", "dist", "build", "vendor", ".next", "out", "target",
+    "__pycache__", ".venv", "venv", "site-packages", "bower_components",
+    "coverage", ".git", "third_party", ".idea", ".gradle",
+})
+# 源码扩展名:评审优先级最高
+_SOURCE_EXTS = (".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java", ".rb", ".rs",
+                ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".php", ".kt", ".swift",
+                ".scala", ".sh", ".rs", ".m", ".mm", ".vue")
 
 
 def _should_skip(fname: str, file_diff: str, max_file_chars: int) -> bool:
     low = fname.lower()
+    if any(seg in _SKIP_DIR_SEGMENTS for seg in low.split("/")):
+        return True  # vendored/生成目录
     if any(low.endswith(s) for s in _SKIP_SUFFIXES):
         return True
     if "lock" in low and low.endswith((".json", ".yaml", ".yml", ".toml")):
@@ -85,6 +97,13 @@ def _should_skip(fname: str, file_diff: str, max_file_chars: int) -> bool:
     if len(file_diff) > max_file_chars:
         return True  # 单文件 diff 过大,跳过以保证响应速度
     return False
+
+
+def _review_score(fname: str, file_diff: str) -> int:
+    """评审优先级:源码 > 其它;改动行数越多越靠前。用于'取最该审的 N 个'而非字母序。"""
+    score = 1000 if fname.lower().endswith(_SOURCE_EXTS) else 0
+    churn = sum(1 for ln in file_diff.splitlines() if ln[:1] in "+-")
+    return score + churn
 
 
 def _pack(blocks: list[tuple[str, str]], max_chars: int) -> list[list[tuple[str, str]]]:
@@ -116,9 +135,12 @@ def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000,
     from reviewpilot.diffnorm import split_diff_by_file
     blocks = [(f, d) for f, d in split_diff_by_file(diff)
               if not _should_skip(f, d, max_file_chars)]
+    # 排序:源码 + 改动多的优先,取"最该审的",而非 split/字母序
+    blocks.sort(key=lambda fd: _review_score(fd[0], fd[1]), reverse=True)
     if len(blocks) > max_files:
         if on_progress:
-            on_progress(f"改动文件过多({len(blocks)} 个),仅分析前 {max_files} 个。")
+            on_progress(f"改动较大(过滤生成/依赖后仍 {len(blocks)} 个文件),"
+                        f"按相关性只深审最该看的 {max_files} 个;其余未覆盖,建议给具体 PR 或缩小范围。")
         blocks = blocks[:max_files]
     batches = _pack(blocks, max_chars)
     findings: list[Finding] = []
