@@ -74,3 +74,29 @@ def test_analyze_chunked_skips_generated_and_oversized_files():
     # svg 被跳过(.svg 后缀);a.py 仍分析 → 仅 1 次调用
     assert len(calls) == 1
     assert "pic.svg" not in calls[0]
+
+
+def _many_files_diff(n):
+    return "".join(
+        f"diff --git a/f{i}.py b/f{i}.py\n--- a/f{i}.py\n+++ b/f{i}.py\n@@ -1 +1 @@\n+x{i}\n"
+        for i in range(n)
+    )
+
+
+def test_analyze_chunked_packs_files_into_fewer_calls():
+    from reviewpilot.analyzer import analyze_chunked
+    calls = []
+    stub = lambda p: calls.append(p) or "[]"
+    # 4 个小文件(每个约 60 余字符),预算 200 → 打包成 <4 次调用
+    analyze_chunked(_many_files_diff(4), "t", "b", None, llm=stub, max_chars=200)
+    assert 1 <= len(calls) < 4
+
+
+def test_analyze_chunked_caps_file_count():
+    from reviewpilot.analyzer import analyze_chunked
+    calls = []
+    stub = lambda p: calls.append(p) or "[]"
+    analyze_chunked(_many_files_diff(50), "t", "b", None, llm=stub,
+                    max_chars=120, max_files=5)
+    joined = "\n".join(calls)
+    assert "f0.py" in joined and "f10.py" not in joined   # 只分析前 5 个
