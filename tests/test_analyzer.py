@@ -42,3 +42,22 @@ def test_parse_findings_ignores_bracket_prefix_text():
 
 def test_parse_findings_returns_empty_on_non_list_json():
     assert parse_findings('{"kind":"risk","title":"t"}') == []
+
+
+def test_analyze_chunked_single_call_under_threshold():
+    calls = []
+    stub = lambda p: calls.append(p) or '[{"kind":"summary","title":"s"}]'
+    from reviewpilot.analyzer import analyze_chunked
+    analyze_chunked("small diff", "t", "b", None, llm=stub, max_chars=6000)
+    assert len(calls) == 1
+
+
+def test_analyze_chunked_splits_per_file_over_threshold():
+    big = ("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n+y\n"
+           "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n+n\n")
+    calls = []
+    stub = lambda p: calls.append(p) or '[{"kind":"summary","title":"s"}]'
+    from reviewpilot.analyzer import analyze_chunked
+    findings = analyze_chunked(big, "t", "b", None, llm=stub, max_chars=10)
+    assert len(calls) == 2          # 按文件拆成 2 次调用
+    assert len(findings) == 2       # 合并两块的 findings

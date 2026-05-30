@@ -69,3 +69,15 @@ def parse_findings(raw: str) -> list[Finding]:
 
 def analyze(diff, title, body, issue, llm) -> list[Finding]:
     return parse_findings(llm(build_prompt(diff, title, body, issue)))
+
+
+def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000) -> list[Finding]:
+    """大 PR 分块:diff 超过 max_chars 时按文件拆分逐块分析再合并,
+    避免单次塞入超长 diff(扣题面"上下文/响应速度")。小 PR 走单次调用。"""
+    if len(diff) <= max_chars:
+        return analyze(diff, title, body, issue, llm)
+    from reviewpilot.diffnorm import split_diff_by_file
+    findings: list[Finding] = []
+    for _fname, file_diff in split_diff_by_file(diff):
+        findings.extend(analyze(file_diff, title, body, issue, llm))
+    return findings

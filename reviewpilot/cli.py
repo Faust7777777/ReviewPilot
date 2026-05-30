@@ -1,6 +1,6 @@
 import argparse
 from reviewpilot.prfetch import fetch_pr, _default_runner
-from reviewpilot.analyzer import analyze
+from reviewpilot.analyzer import analyze_chunked
 from reviewpilot.guardrail import apply_guardrail
 from reviewpilot.briefing import render_briefing
 from reviewpilot.models import Briefing
@@ -9,7 +9,7 @@ from reviewpilot.llm import deepseek_llm
 
 def build_briefing(url: str, llm=deepseek_llm, runner=_default_runner) -> Briefing:
     pr = fetch_pr(url, runner=runner)
-    findings = analyze(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
+    findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
     findings = apply_guardrail(findings)
     return Briefing(pr_ref=pr.pr_ref, findings=findings)
 
