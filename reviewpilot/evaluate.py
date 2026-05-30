@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from reviewpilot.analyzer import analyze
+from reviewpilot.analyzer import analyze_chunked
 from reviewpilot.guardrail import apply_guardrail
 from reviewpilot.models import Finding, FindingKind
 
@@ -71,9 +71,10 @@ def _problem_findings(findings: list[Finding]) -> list[Finding]:
 
 def evaluate_sample(s: Sample, llm, apply_guard: bool = True) -> SampleResult:
     t0 = time.perf_counter()
-    findings = analyze(s.diff, s.title, s.body, s.issue, llm=llm)
+    # 与生产 build_briefing_for 同款链路:analyze_chunked + 带 diff 的护栏(证据落盘校验)
+    findings = analyze_chunked(s.diff, s.title, s.body, s.issue, llm=llm)
     if apply_guard:
-        findings = apply_guardrail(findings)
+        findings = apply_guardrail(findings, diff=s.diff)
     latency = time.perf_counter() - t0
 
     problems = _problem_findings(findings)
