@@ -1,5 +1,9 @@
-"""薄 GUI:填 PR 链接 → 渲染 reviewer briefing。内部复用 CLI 引擎(build_briefing)。"""
+"""薄 GUI(对话式):填 PR 链接 → 出 briefing → 在网页里继续追问/反驳。
+
+服务端渲染 + 内存会话(session_id → ChatSession),无需额外 JS。复用 CLI/chat 引擎。
+"""
 import html
+import uuid
 
 from reviewpilot.models import Briefing, Finding
 
@@ -16,26 +20,26 @@ _PAGE = """<!doctype html>
 <title>ReviewPilot</title>
 <style>
  :root {{ --bg:#0f1117; --card:#1a1d27; --line:#2a2f3a; --fg:#e6e8ee; --mut:#9aa3b2;
-          --hi:#2ec07a; --warn:#e0a93b; --hum:#7b8494; }}
+          --hi:#2ec07a; --warn:#e0a93b; --hum:#7b8494; --me:#243049; }}
  * {{ box-sizing:border-box; }}
  body {{ margin:0; background:var(--bg); color:var(--fg);
          font:15px/1.6 -apple-system,Segoe UI,Roboto,"PingFang SC",sans-serif; }}
  .wrap {{ max-width:780px; margin:0 auto; padding:32px 20px 64px; }}
  h1 {{ font-size:22px; margin:0 0 4px; }} .sub {{ color:var(--mut); margin:0 0 24px; }}
- form {{ display:flex; gap:8px; margin-bottom:28px; }}
+ form {{ display:flex; gap:8px; margin-bottom:22px; }}
  input[type=text] {{ flex:1; padding:11px 13px; border-radius:9px; border:1px solid var(--line);
                      background:#11141c; color:var(--fg); font-size:14px; }}
  button {{ padding:11px 18px; border:0; border-radius:9px; background:var(--hi);
            color:#06281a; font-weight:600; cursor:pointer; }}
- .ref {{ color:var(--mut); font-size:13px; margin-bottom:18px; }}
- .group {{ margin-bottom:22px; }}
+ .ref {{ color:var(--mut); font-size:13px; margin-bottom:14px; }}
+ .group {{ margin-bottom:20px; }}
  .group h2 {{ font-size:14px; color:var(--mut); text-transform:uppercase;
               letter-spacing:.05em; margin:0 0 10px; }}
  .card {{ background:var(--card); border:1px solid var(--line); border-radius:11px;
           padding:13px 15px; margin-bottom:9px; }}
  .card .t {{ font-weight:600; }}
  .badge {{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px;
-           border-radius:999px; margin-right:8px; vertical-align:middle; }}
+           border-radius:999px; margin-right:8px; }}
  .b-high {{ background:rgba(46,192,122,.15); color:var(--hi); }}
  .b-check {{ background:rgba(224,169,59,.15); color:var(--warn); }}
  .b-human {{ background:rgba(123,132,148,.18); color:var(--hum); }}
@@ -43,6 +47,10 @@ _PAGE = """<!doctype html>
  .meta code {{ background:#11141c; padding:1px 6px; border-radius:5px; }}
  .empty {{ color:var(--mut); }}
  .err {{ background:rgba(224,59,59,.12); color:#e36; padding:12px 14px; border-radius:9px; }}
+ .bubble {{ border-radius:11px; padding:10px 14px; margin-bottom:9px; white-space:pre-wrap; }}
+ .b-user {{ background:var(--me); margin-left:48px; }}
+ .b-asst {{ background:var(--card); border:1px solid var(--line); margin-right:48px; }}
+ .who {{ font-size:11px; color:var(--mut); margin-bottom:3px; }}
 </style></head>
 <body><div class="wrap">
  <h1>ReviewPilot</h1>
@@ -106,19 +114,50 @@ def render_briefing_html(b: Briefing) -> str:
     return "\n".join(blocks)
 
 
+def _ask_form(session_id: str) -> str:
+    return (f'<form method="post" action="/ask">'
+            f'<input type="hidden" name="session_id" value="{html.escape(session_id)}">'
+            f'<input type="text" name="question" placeholder="追问 / 反驳…(如:第2条为什么?)" required>'
+            f'<button type="submit">追问</button></form>')
+
+
+def _conversation_html(messages: list[dict]) -> str:
+    out = []
+    for m in messages:
+        if m["role"] == "system":
+            continue
+        who = "你" if m["role"] == "user" else "ReviewPilot"
+        cls = "b-user" if m["role"] == "user" else "b-asst"
+        out.append(f'<div class="bubble {cls}"><div class="who">{who}</div>'
+                    f'{html.escape(m["content"])}</div>')
+    if not out:
+        return ""
+    return f'<div class="group"><h2>追问</h2>{"".join(out)}</div>'
+
+
 def render_page(pr_url: str = "", result: str = "") -> str:
     return _PAGE.format(pr_url=html.escape(pr_url), result=result)
 
 
-def create_app(briefing_fn=None):
-    """briefing_fn(url)->Briefing,默认用 CLI 引擎(实时调 LLM)。测试时可注入。"""
+def _default_prepare(pr_url: str):
+    """(briefing, ChatSession):经 gh 取 PR、出 briefing、建会话。测试时注入替换。"""
+    from reviewpilot.prfetch import fetch_pr
+    from reviewpilot.cli import build_briefing_for, _CHAT_LLM
+    from reviewpilot.briefing import render_briefing
+    from reviewpilot.chat import ChatSession
+    pr = fetch_pr(pr_url)
+    briefing = build_briefing_for(pr)
+    session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue,
+                          render_briefing(briefing))
+    return briefing, session
+
+
+def create_app(prepare_fn=_default_prepare):
     from fastapi import FastAPI, Form
     from fastapi.responses import HTMLResponse
 
-    if briefing_fn is None:
-        from reviewpilot.cli import build_briefing as briefing_fn
-
     app = FastAPI(title="ReviewPilot")
+    sessions: dict[str, dict] = {}  # session_id -> {"briefing", "session"}
 
     @app.get("/", response_class=HTMLResponse)
     def index():
@@ -129,10 +168,27 @@ def create_app(briefing_fn=None):
         if not pr_url.strip():
             return render_page("", '<div class="err">请填写 PR 链接。</div>')
         try:
-            briefing = briefing_fn(pr_url)
-            return render_page(pr_url, render_briefing_html(briefing))
+            briefing, session = prepare_fn(pr_url)
         except Exception as exc:  # 显式失败,不静默
             return render_page(pr_url, f'<div class="err">评审失败:{html.escape(str(exc))}</div>')
+        sid = uuid.uuid4().hex
+        sessions[sid] = {"briefing": briefing, "session": session}
+        return render_page(pr_url, render_briefing_html(briefing) + _ask_form(sid))
+
+    @app.post("/ask", response_class=HTMLResponse)
+    def ask(session_id: str = Form(""), question: str = Form("")):
+        slot = sessions.get(session_id)
+        if slot is None:
+            return render_page("", '<div class="err">会话已过期,请重新评审。</div>')
+        if question.strip():
+            try:
+                slot["session"].ask(question)
+            except Exception as exc:
+                return render_page("", f'<div class="err">追问失败:{html.escape(str(exc))}</div>')
+        result = (render_briefing_html(slot["briefing"])
+                  + _conversation_html(slot["session"].messages)
+                  + _ask_form(session_id))
+        return render_page("", result)
 
     return app
 
