@@ -32,7 +32,16 @@ reviewpilot chat https://github.com/owner/repo/pull/123
 uvicorn reviewpilot.web:app --port 8848      # 打开 http://localhost:8848
 ```
 
-模型经 `litellm` 接入,把 `RP_MODEL` / key 换成 `openai/...` 或 `anthropic/...` 即可切换 provider。
+**换模型 / 换 provider:** 模型经 `litellm` 接入,按模型前缀自动选用对应 provider 的原生 key。例如:
+
+```bash
+export RP_MODEL=openai/gpt-4o      OPENAI_API_KEY=sk-...        # 切 OpenAI
+export RP_MODEL=anthropic/claude-… ANTHROPIC_API_KEY=sk-...      # 切 Anthropic
+# 分阶段指定模型(便宜模型抽事实、强模型做判断、快模型做对话):
+export RP_MODEL_ANALYZE=...  RP_MODEL_CHAT=...  RP_MODEL_EVAL=...
+```
+
+解析优先级:阶段 env `RP_MODEL_<STAGE>` > `RP_MODEL` > 默认(`deepseek/deepseek-v4-flash`)。
 
 ## 架构
 

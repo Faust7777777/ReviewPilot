@@ -1,28 +1,35 @@
 import argparse
+from functools import partial
+
 from reviewpilot.prfetch import fetch_pr, _default_runner
 from reviewpilot.analyzer import analyze_chunked
 from reviewpilot.guardrail import apply_guardrail
 from reviewpilot.briefing import render_briefing
 from reviewpilot.models import Briefing
-from reviewpilot.llm import deepseek_llm, deepseek_chat
+from reviewpilot.llm import complete, chat
 from reviewpilot.chat import ChatSession
 
+# 各阶段默认 LLM(可经 RP_MODEL_<STAGE> 分别指定模型)
+_ANALYZE_LLM = partial(complete, stage="analyze")
+_CHAT_LLM = partial(chat, stage="chat")
+_EVAL_LLM = partial(complete, stage="eval")
 
-def build_briefing_for(pr, llm=deepseek_llm) -> Briefing:
+
+def build_briefing_for(pr, llm=_ANALYZE_LLM) -> Briefing:
     findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
     findings = apply_guardrail(findings)
     return Briefing(pr_ref=pr.pr_ref, findings=findings)
 
 
-def build_briefing(url: str, llm=deepseek_llm, runner=_default_runner) -> Briefing:
+def build_briefing(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> Briefing:
     return build_briefing_for(fetch_pr(url, runner=runner), llm=llm)
 
 
-def run_review(url: str, llm=deepseek_llm, runner=_default_runner) -> str:
+def run_review(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> str:
     return render_briefing(build_briefing(url, llm=llm, runner=runner))
 
 
-def run_chat(url: str, chat_llm=deepseek_chat, analyze_llm=deepseek_llm,
+def run_chat(url: str, chat_llm=_CHAT_LLM, analyze_llm=_ANALYZE_LLM,
              runner=_default_runner, input_fn=input, output_fn=print) -> None:
     """先出 briefing,再进入多轮追问。input_fn/output_fn 可注入便于测试。"""
     pr = fetch_pr(url, runner=runner)
@@ -59,7 +66,7 @@ def main(argv=None):
         run_chat(args.pr_url)
     elif args.cmd == "eval":
         from reviewpilot.evaluate import load_samples, evaluate
-        result = evaluate(load_samples(args.samples), llm=deepseek_llm,
+        result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
                           apply_guard=not args.no_guard)
         print(result.summary())
 
