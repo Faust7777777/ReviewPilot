@@ -47,3 +47,9 @@ def test_review_endpoint_reports_error_explicitly():
     client = TestClient(create_app(briefing_fn=boom))
     r = client.post("/review", data={"pr_url": "x"})
     assert r.status_code == 200 and "评审失败" in r.text and "gh failed" in r.text
+
+
+def test_review_endpoint_empty_url_shows_error_page():
+    client = TestClient(create_app(briefing_fn=lambda url: _briefing()))
+    r = client.post("/review", data={"pr_url": ""})
+    assert r.status_code == 200 and "请填写 PR 链接" in r.text

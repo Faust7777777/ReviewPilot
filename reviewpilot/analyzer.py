@@ -25,18 +25,34 @@ def build_prompt(diff: str, title: str, body: str, issue: str | None) -> str:
     return _PROMPT.format(title=title, body=body, issue=issue or "(无)", diff=diff)
 
 
-def _extract_json_array(text: str) -> str:
-    fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.S)
-    if fenced:
-        return fenced.group(1)
-    start, end = text.find("["), text.rfind("]")
-    return text[start:end + 1] if start != -1 and end != -1 else "[]"
+def _first_json_array(text: str) -> list | None:
+    """扫描每个 '[' 候选位置,用 raw_decode 返回首个能解析成 list 的 JSON 数组。
+    比'首个[到最后]切片'稳健:前缀里出现 `[备注]` 之类不会污染解析。"""
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "[":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[i:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, list):
+            return obj
+    return None
 
 
 def parse_findings(raw: str) -> list[Finding]:
-    try:
-        data = json.loads(_extract_json_array(raw))
-    except json.JSONDecodeError:
+    data: list | None = None
+    fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw, re.S)
+    if fenced:
+        try:
+            cand = json.loads(fenced.group(1))
+            data = cand if isinstance(cand, list) else None
+        except json.JSONDecodeError:
+            data = None
+    if data is None:
+        data = _first_json_array(raw)
+    if data is None:
         return []
     out: list[Finding] = []
     for item in data:

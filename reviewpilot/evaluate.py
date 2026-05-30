@@ -37,11 +37,15 @@ class SampleResult:
     latency_s: float
 
 
+def _pct(rate: float | None) -> str:
+    return "N/A" if rate is None else f"{rate:.0%}"
+
+
 @dataclass
 class EvalResult:
     results: list[SampleResult]
-    fp_rate: float        # 误报率 = FP / clean 样本数
-    fn_rate: float        # 漏报率 = FN / issue 样本数
+    fp_rate: float | None  # 误报率 = FP / clean 样本数;无 clean 样本时 None
+    fn_rate: float | None  # 漏报率 = FN / issue 样本数;无 issue 样本时 None
 
     def summary(self) -> str:
         n = len(self.results)
@@ -52,7 +56,7 @@ class EvalResult:
         avg = sum(r.latency_s for r in self.results) / n if n else 0.0
         lines = [
             f"样本 {n}  TP={tp} TN={tn} FP={fp} FN={fn}",
-            f"误报率(FP/clean) = {self.fp_rate:.0%}   漏报率(FN/issue) = {self.fn_rate:.0%}   "
+            f"误报率(FP/clean) = {_pct(self.fp_rate)}   漏报率(FN/issue) = {_pct(self.fn_rate)}   "
             f"平均延迟 = {avg:.1f}s",
             "",
         ]
@@ -89,11 +93,15 @@ def evaluate_sample(s: Sample, llm, apply_guard: bool = True) -> SampleResult:
 
 def evaluate(samples: list[Sample], llm, apply_guard: bool = True) -> EvalResult:
     results = [evaluate_sample(s, llm, apply_guard=apply_guard) for s in samples]
-    n_clean = sum(s.label == "clean" for s in samples) or 1
-    n_issue = sum(s.label == "issue" for s in samples) or 1
+    n_clean = sum(s.label == "clean" for s in samples)
+    n_issue = sum(s.label == "issue" for s in samples)
     fp = sum(r.outcome == "FP" for r in results)
     fn = sum(r.outcome == "FN" for r in results)
-    return EvalResult(results=results, fp_rate=fp / n_clean, fn_rate=fn / n_issue)
+    return EvalResult(
+        results=results,
+        fp_rate=fp / n_clean if n_clean else None,
+        fn_rate=fn / n_issue if n_issue else None,
+    )
 
 
 def load_samples(path: str) -> list[Sample]:
