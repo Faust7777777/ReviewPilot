@@ -17,7 +17,7 @@ _EVAL_LLM = partial(complete, stage="eval")
 
 def build_briefing_for(pr, llm=_ANALYZE_LLM) -> Briefing:
     findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
-    findings = apply_guardrail(findings)
+    findings = apply_guardrail(findings, diff=pr.diff)
     return Briefing(pr_ref=pr.pr_ref, findings=findings)
 
 
