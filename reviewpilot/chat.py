@@ -28,6 +28,12 @@ class ChatSession:
                                 diff=diff, briefing=briefing_text)
         self.messages: list[dict] = [{"role": "system", "content": system}]
 
+    @classmethod
+    def from_state(cls, llm, diff, title, body, issue, briefing_text, messages):
+        session = cls(llm, diff, title, body, issue, briefing_text)
+        session.messages = list(messages)
+        return session
+
     def ask(self, user_msg: str) -> str:
         self.messages.append({"role": "user", "content": user_msg})
         reply = self.llm(self.messages)
