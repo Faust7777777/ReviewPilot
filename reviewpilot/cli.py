@@ -7,11 +7,15 @@ from reviewpilot.models import Briefing
 from reviewpilot.llm import deepseek_llm
 
 
-def run_review(url: str, llm=deepseek_llm, runner=_default_runner) -> str:
+def build_briefing(url: str, llm=deepseek_llm, runner=_default_runner) -> Briefing:
     pr = fetch_pr(url, runner=runner)
     findings = analyze(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
     findings = apply_guardrail(findings)
-    return render_briefing(Briefing(pr_ref=pr.pr_ref, findings=findings))
+    return Briefing(pr_ref=pr.pr_ref, findings=findings)
+
+
+def run_review(url: str, llm=deepseek_llm, runner=_default_runner) -> str:
+    return render_briefing(build_briefing(url, llm=llm, runner=runner))
 
 
 def main(argv=None):
