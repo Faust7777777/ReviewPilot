@@ -122,8 +122,11 @@ def _pack(blocks: list[tuple[str, str]], max_chars: int) -> list[list[tuple[str,
     return batches
 
 
+DEFAULT_MAX_FILES = 40  # 超过则只深审最相关的这么多个(见诚实范围提示)
+
+
 def analyze_chunked(diff, title, body, issue, llm, max_chars: int = 6000,
-                    max_file_chars: int = 12000, max_files: int = 40,
+                    max_file_chars: int = 12000, max_files: int = DEFAULT_MAX_FILES,
                     on_progress=None) -> list[Finding]:
     """大 PR 分块:diff 超过 max_chars 时按文件拆分,**按预算打包成几批**(而非逐文件一次调用)
     再合并;跳过生成类/二进制/超大文件;文件过多则只分析前 max_files 个。小 PR 走单次调用。
