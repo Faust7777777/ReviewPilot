@@ -30,7 +30,7 @@ reviewpilot chat                                          # 进 TUI 后粘贴 PR
 reviewpilot chat https://github.com/owner/repo/pull/123   # 带参数则自动开跑
 # 非 tty 自动回退普通多轮;全屏界面预览见 docs/tui-screenshot.svg
 
-# 网页 GUI:填 PR 链接 → 渲染 briefing
+# 网页 GUI:填 PR 链接 → 左右分屏(左=改动代码,右=briefing+对话式追问)
 uvicorn reviewpilot.web:app --port 8848      # 打开 http://localhost:8848
 ```
 

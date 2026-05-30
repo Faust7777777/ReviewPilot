@@ -24,7 +24,7 @@ _PAGE = """<!doctype html>
  * {{ box-sizing:border-box; }}
  body {{ margin:0; background:var(--bg); color:var(--fg);
          font:15px/1.6 -apple-system,Segoe UI,Roboto,"PingFang SC",sans-serif; }}
- .wrap {{ max-width:780px; margin:0 auto; padding:32px 20px 64px; }}
+ .wrap {{ max-width:1200px; margin:0 auto; padding:32px 20px 64px; }}
  h1 {{ font-size:22px; margin:0 0 4px; }} .sub {{ color:var(--mut); margin:0 0 24px; }}
  form {{ display:flex; gap:8px; margin-bottom:22px; }}
  input[type=text] {{ flex:1; padding:11px 13px; border-radius:9px; border:1px solid var(--line);
@@ -51,6 +51,15 @@ _PAGE = """<!doctype html>
  .b-user {{ background:var(--me); margin-left:48px; }}
  .b-asst {{ background:var(--card); border:1px solid var(--line); margin-right:48px; }}
  .who {{ font-size:11px; color:var(--mut); margin-bottom:3px; }}
+ .cols {{ display:flex; gap:18px; align-items:flex-start; }}
+ .left, .right {{ flex:1; min-width:0; }}
+ details.file {{ background:var(--card); border:1px solid var(--line);
+                 border-radius:9px; margin-bottom:8px; }}
+ details.file summary {{ cursor:pointer; padding:8px 12px; font-size:13px; color:var(--fg); }}
+ details.file pre {{ margin:0; padding:10px 12px; overflow:auto; max-height:360px;
+                     font:12px/1.5 ui-monospace,Menlo,Consolas,monospace; }}
+ .add {{ color:var(--hi); }} .del {{ color:#e07a7a; }}
+ @media (max-width:900px) {{ .cols {{ flex-direction:column; }} }}
 </style></head>
 <body><div class="wrap">
  <h1>ReviewPilot</h1>
@@ -135,6 +144,31 @@ def _conversation_html(messages: list[dict]) -> str:
     return f'<div class="group"><h2>追问</h2>{"".join(out)}</div>'
 
 
+def render_diff_html(diff: str) -> str:
+    """左栏:逐文件展示原始改动代码(+/- 着色),供"边看代码边问"。"""
+    from reviewpilot.diffnorm import split_diff_by_file
+    files = split_diff_by_file(diff)
+    if not files:
+        return '<p class="empty">无 diff</p>'
+    out = []
+    for fname, fdiff in files:
+        lines = []
+        for ln in fdiff.splitlines():
+            cls = "add" if ln[:1] == "+" else "del" if ln[:1] == "-" else ""
+            esc = html.escape(ln)
+            lines.append(f'<span class="{cls}">{esc}</span>' if cls else esc)
+        name = html.escape(fname or "改动")
+        out.append(f'<details class="file" open><summary>{name}</summary>'
+                   f'<pre>{chr(10).join(lines)}</pre></details>')
+    return f'<div class="group"><h2>改动代码</h2>{"".join(out)}</div>'
+
+
+def _split(diff: str, right_html: str) -> str:
+    """左右分屏:左=改动代码,右=briefing/对话。"""
+    return (f'<div class="cols"><div class="left">{render_diff_html(diff)}</div>'
+            f'<div class="right">{right_html}</div></div>')
+
+
 def render_page(pr_url: str = "", result: str = "") -> str:
     return _PAGE.format(pr_url=html.escape(pr_url), result=result)
 
@@ -149,7 +183,7 @@ def _default_prepare(pr_url: str):
     briefing = build_briefing_for(pr)
     session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue,
                           render_briefing(briefing))
-    return briefing, session
+    return briefing, session, pr.diff
 
 
 def create_app(prepare_fn=_default_prepare):
@@ -168,12 +202,13 @@ def create_app(prepare_fn=_default_prepare):
         if not pr_url.strip():
             return render_page("", '<div class="err">请填写 PR 链接。</div>')
         try:
-            briefing, session = prepare_fn(pr_url)
+            briefing, session, diff = prepare_fn(pr_url)
         except Exception as exc:  # 显式失败,不静默
             return render_page(pr_url, f'<div class="err">评审失败:{html.escape(str(exc))}</div>')
         sid = uuid.uuid4().hex
-        sessions[sid] = {"briefing": briefing, "session": session}
-        return render_page(pr_url, render_briefing_html(briefing) + _ask_form(sid))
+        sessions[sid] = {"briefing": briefing, "session": session, "diff": diff}
+        right = render_briefing_html(briefing) + _ask_form(sid)
+        return render_page(pr_url, _split(diff, right))
 
     @app.post("/ask", response_class=HTMLResponse)
     def ask(session_id: str = Form(""), question: str = Form("")):
@@ -185,10 +220,10 @@ def create_app(prepare_fn=_default_prepare):
                 slot["session"].ask(question)
             except Exception as exc:
                 return render_page("", f'<div class="err">追问失败:{html.escape(str(exc))}</div>')
-        result = (render_briefing_html(slot["briefing"])
-                  + _conversation_html(slot["session"].messages)
-                  + _ask_form(session_id))
-        return render_page("", result)
+        right = (render_briefing_html(slot["briefing"])
+                 + _conversation_html(slot["session"].messages)
+                 + _ask_form(session_id))
+        return render_page("", _split(slot.get("diff", ""), right))
 
     return app
 
