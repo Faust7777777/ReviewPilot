@@ -5,6 +5,15 @@
 不再硬绑 DeepSeek。模型解析优先级:显式 override > 阶段 env(RP_MODEL_<STAGE>)> RP_MODEL > 默认。
 """
 import os
+import warnings
+
+# 进程级精准过滤 litellm 内部那条 pydantic 序列化告警(跨线程/延迟序列化也能盖住),
+# 只针对这一条,不误伤用户代码的真实 warning。
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=r".*Pydantic serializer warnings.*",
+)
 
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 
