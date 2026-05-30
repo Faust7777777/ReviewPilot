@@ -21,6 +21,18 @@
 - ✅ TN `clean-correct-fix`、`clean-docs-typo`、`clean-rename-var`
 - ❌ FP `clean-add-test` —— 把"新增测试"误判为问题。
 
+## 改进后(强制证据 prompt,2026-05-31)
+
+针对下方第 1 条改进项,在 analyzer prompt 中**强制每条 finding 必带 file+line+原样引用证据**,并加入"新增测试/重命名/拼写/格式化属低风险默认不指认"。重跑(护栏 ON):
+
+| 配置 | 误报率 | 漏报率 |
+|---|---|---|
+| 改进前 护栏 ON | 25% | 25% |
+| **改进后 护栏 ON** | 25% | **0%** ↓ |
+
+- ✅ `wrong-operator` 由 FN 转 TP:模型这次带了行号证据,通过证据门没被误杀(漏报率 25%→0%)。
+- ⚠️ `clean-add-test` 仍是 FP:低风险提示未完全压住"把新增测试当问题",误报率仍 25%。这是下一步要继续治的点(更明确的 negative few-shot,或对 test/docs 文件降权)。
+
 ## 诚实分析与改进项
 
 1. **证据门误杀真问题(护栏 ON 漏报↑)。** `wrong-operator` 模型其实发现了,但该 finding 没带行号证据,被护栏的"无证据则丢弃"规则删掉 → 变成漏报(护栏 OFF 时它是 TP)。
