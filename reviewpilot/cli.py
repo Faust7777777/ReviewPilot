@@ -104,7 +104,8 @@ class _ChatServices:
 
     def interpret(self, text):
         from reviewpilot.resolve import interpret_target
-        return interpret_target(text, llm=_CHAT_LLM)
+        # interpret_target 调 llm(字符串),必须用字符串型 complete(而非接收 messages 列表的 chat)
+        return interpret_target(text, llm=partial(complete, stage="analyze"))
 
     def pr_data(self, ref):
         return fetch_pr(ref)
