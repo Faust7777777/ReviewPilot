@@ -43,6 +43,10 @@ def test_enter_then_give_pr_then_chat():
                 if len(session.messages) >= 3:
                     break
                 await pilot.pause(0.02)
+            # 三类视觉区分:用户气泡 / 思考进度 / 最终回复 用不同 css class
+            assert app.query(".msg-user")
+            assert app.query(".msg-thinking")
+            assert app.query(".msg-final")
 
     _run(scenario())
     assert progress_seen == ["local:worktree"]
