@@ -1,5 +1,9 @@
 import json
-from reviewpilot.prfetch import fetch_pr, PRData
+import subprocess
+
+import pytest
+
+from reviewpilot.prfetch import fetch_pr, fetch_local, PRData, PRFetchError
 
 def test_fetch_pr_parses_gh_outputs():
     def fake_runner(args):
@@ -24,3 +28,31 @@ def test_parse_ref_strips_git_suffix():
         raise AssertionError(args)
     data = fetch_pr("https://github.com/o/r.git/pull/7", runner=fake_runner)
     assert data.pr_ref == "o/r#7"
+
+
+def test_fetch_pr_classifies_auth_error():
+    def boom(args):
+        raise subprocess.CalledProcessError(1, args, stderr="gh: not logged in to any hosts")
+    with pytest.raises(PRFetchError) as ei:
+        fetch_pr("https://github.com/o/r/pull/7", runner=boom)
+    assert "登录" in str(ei.value)
+
+
+def test_fetch_local_worktree_builds_prdata():
+    def runner(args):
+        assert args[:4] == ["git", "-C", ".", "diff"]
+        return "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n+x"
+    data = fetch_local(runner=runner)
+    assert data.pr_ref == "local:worktree"
+    assert data.title == "(本地改动)" and "+x" in data.diff
+
+
+def test_fetch_local_range_and_title():
+    data = fetch_local(diff_range="main...HEAD", title="我的改动",
+                       runner=lambda args: "+y")
+    assert data.pr_ref == "local:main...HEAD" and data.title == "我的改动"
+
+
+def test_fetch_local_empty_diff_raises():
+    with pytest.raises(PRFetchError):
+        fetch_local(runner=lambda args: "   \n")

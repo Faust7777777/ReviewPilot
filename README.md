@@ -43,6 +43,16 @@ export RP_MODEL_ANALYZE=...  RP_MODEL_CHAT=...  RP_MODEL_EVAL=...
 
 解析优先级:阶段 env `RP_MODEL_<STAGE>` > `RP_MODEL` > 默认(`deepseek/deepseek-v4-flash`)。
 
+**私有仓库 / 本地模式:** 私有库的 PR 同样可评——`gh` 已登录且 token 有权限即可(`gh auth login` 或 `GH_TOKEN`)。若不想/不能走 GitHub(私有内网、未推送分支、审前自检),用**本地模式**直接读 `git diff`:
+
+```bash
+reviewpilot review --local                       # 工作区未提交改动
+reviewpilot review --local --staged              # 仅暂存区
+reviewpilot review --local --range main...HEAD   # 指定范围,可加 --title/--body 提供"意图"
+```
+
+获取失败会给可操作提示(未登录 / 无权限 / 速率限制 / 改用 --local),而非裸异常。
+
 ## 架构
 
 ```
