@@ -34,3 +34,18 @@ def test_interpret_target_returns_unknown_when_llm_returns_none():
 
 def test_interpret_target_returns_unknown_for_fuzzy_text_without_llm():
     assert interpret_target("react 仓库") == Target("unknown")
+
+
+def test_chat_services_interpret_passes_string_prompt_to_llm(monkeypatch):
+    # 回归:cli 必须给 interpret_target 传"字符串型 complete",而非接收 messages 列表的 chat
+    from reviewpilot import cli
+    seen = {}
+
+    def fake_complete(prompt, model=None, stage=None):
+        seen["type"] = type(prompt).__name__
+        return "facebook/react"
+
+    monkeypatch.setattr(cli, "complete", fake_complete)
+    target = cli._ChatServices().interpret("分析 react 项目")
+    assert seen["type"] == "str"
+    assert target.kind == "confirm" and target.candidate == "facebook/react"
