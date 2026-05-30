@@ -25,9 +25,10 @@ export RP_MODEL=deepseek/deepseek-v4-flash   # 可选,默认即此
 # 命令行:对一个 PR 出 briefing
 reviewpilot review https://github.com/owner/repo/pull/123
 
-# 多轮对话评审:在交互式终端启动全屏 TUI(对话区 + 输入框);非 tty 自动回退普通多轮
-reviewpilot chat https://github.com/owner/repo/pull/123
-# 全屏界面预览见 docs/tui-screenshot.svg
+# 多轮对话评审:全屏 TUI。先进界面、再贴 PR(能实时看到分析过程),然后继续追问
+reviewpilot chat                                          # 进 TUI 后粘贴 PR 链接 / 输入 local
+reviewpilot chat https://github.com/owner/repo/pull/123   # 带参数则自动开跑
+# 非 tty 自动回退普通多轮;全屏界面预览见 docs/tui-screenshot.svg
 
 # 网页 GUI:填 PR 链接 → 渲染 briefing
 uvicorn reviewpilot.web:app --port 8848      # 打开 http://localhost:8848

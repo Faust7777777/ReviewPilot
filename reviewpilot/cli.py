@@ -17,8 +17,9 @@ _CHAT_LLM = partial(chat, stage="chat")
 _EVAL_LLM = partial(complete, stage="eval")
 
 
-def build_briefing_for(pr, llm=_ANALYZE_LLM) -> Briefing:
-    findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm)
+def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None) -> Briefing:
+    findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
+                               on_progress=on_progress)
     findings = apply_guardrail(findings, diff=pr.diff)
     summary, inspected, limitations = build_inspection(pr.diff, findings)
     return Briefing(pr_ref=pr.pr_ref, findings=findings,
@@ -31,6 +32,23 @@ def build_briefing(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> Briefi
 
 def run_review(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> str:
     return render_briefing(build_briefing(url, llm=llm, runner=runner))
+
+
+def resolve_pr_text(text: str):
+    """把用户在 TUI 里输入的一行解析为 PRData:
+    GitHub PR 链接 → fetch_pr;`local` / `local main...HEAD` / `local --staged` → fetch_local。"""
+    text = text.strip()
+    low = text.lower()
+    if low == "local":
+        return fetch_local()
+    if low.startswith("local"):
+        rest = text[len("local"):].strip()
+        if rest in ("--staged", "staged"):
+            return fetch_local(staged=True)
+        if rest.startswith("--range"):
+            rest = rest[len("--range"):].strip()
+        return fetch_local(diff_range=rest) if rest else fetch_local()
+    return fetch_pr(text)
 
 
 def run_chat(url: str = None, chat_llm=_CHAT_LLM, analyze_llm=_ANALYZE_LLM,
@@ -74,27 +92,33 @@ def _pr_from_args(args):
     return fetch_pr(args.pr_url)
 
 
-def _run_chat_ui(pr) -> None:
-    """tty 下启全屏 textual TUI(界面先起、分析在后台);否则回退普通多轮。"""
+def _analyze_to_session(pr, on_progress=None):
+    """(briefing_text, session):分析 PR 出 briefing 并建会话。on_progress 透传给分析。"""
+    briefing_text = render_briefing(build_briefing_for(pr, on_progress=on_progress))
+    session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
+    return briefing_text, session
+
+
+def _run_chat_ui(initial: str = None) -> None:
+    """tty 下启全屏 TUI(先进界面、再在里面给 PR、看分析过程);否则回退普通多轮。
+    initial:可选的初始 PR 文本(命令行传了 PR/--local 时自动开跑)。"""
     import sys
-
-    def prepare():
-        briefing_text = render_briefing(build_briefing_for(pr))
-        session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
-        return briefing_text, session
-
     if sys.stdin.isatty():
         try:
             from reviewpilot.tui_app import ReviewPilotApp
-            ReviewPilotApp(prepare).run()
+            ReviewPilotApp(resolve_pr_text, _analyze_to_session, initial=initial).run()
             return
-        except Exception as exc:  # TUI 不可用则降级,不让用户卡死
+        except Exception as exc:  # TUI 不可用则降级
             print(f"(全屏 TUI 不可用,回退普通模式:{exc})")
-    # 普通多轮(非 tty 或 TUI 失败)
+    # 非 tty 回退:需要初始 PR
+    if not initial:
+        print("⚠️  非交互终端请直接给 PR:reviewpilot chat <PR链接> 或 --local")
+        return
     print("正在分析 PR…")
     try:
-        briefing_text, session = prepare()
-    except Exception as exc:  # LLM/网络/鉴权失败:给提示而非 traceback
+        pr = resolve_pr_text(initial)
+        briefing_text, session = _analyze_to_session(pr)
+    except Exception as exc:
         print(f"⚠️  分析失败:{exc}")
         return
     print(briefing_text)
@@ -124,7 +148,16 @@ def main(argv=None):
         if args.cmd == "review":
             print(render_briefing(build_briefing_for(_pr_from_args(args))))
         elif args.cmd == "chat":
-            _run_chat_ui(_pr_from_args(args))
+            initial = None  # chat 可不带 PR:进 TUI 后再输入
+            if args.diff_range:
+                initial = f"local {args.diff_range}"
+            elif args.staged:
+                initial = "local --staged"
+            elif args.local:
+                initial = "local"
+            elif args.pr_url:
+                initial = args.pr_url
+            _run_chat_ui(initial)
         elif args.cmd == "eval":
             from reviewpilot.evaluate import load_samples, evaluate
             result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
