@@ -23,9 +23,17 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
     rev = sub.add_parser("review")
     rev.add_argument("pr_url")
+    ev = sub.add_parser("eval")
+    ev.add_argument("samples", help="带标注的样本集 JSON,如 evalset/samples.json")
+    ev.add_argument("--no-guard", action="store_true", help="关闭诚实护栏(用于对照)")
     args = parser.parse_args(argv)
     if args.cmd == "review":
         print(run_review(args.pr_url))
+    elif args.cmd == "eval":
+        from reviewpilot.evaluate import load_samples, evaluate
+        result = evaluate(load_samples(args.samples), llm=deepseek_llm,
+                          apply_guard=not args.no_guard)
+        print(result.summary())
 
 
 if __name__ == "__main__":
