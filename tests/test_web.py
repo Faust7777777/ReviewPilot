@@ -16,10 +16,14 @@ def _briefing():
     ])
 
 
+_DIFF = ("diff --git a/pay.py b/pay.py\n--- a/pay.py\n+++ b/pay.py\n"
+         "@@ -1 +1 @@\n-old\n+new\n")
+
+
 def _prepare(url):
-    session = ChatSession(lambda msgs: "因为 pay.py:3 改了支付", diff="d", title="t",
+    session = ChatSession(lambda msgs: "因为 pay.py:3 改了支付", diff=_DIFF, title="t",
                           body="b", issue=None, briefing_text="B")
-    return _briefing(), session
+    return _briefing(), session, _DIFF
 
 
 # ---- 纯渲染 ----
@@ -50,6 +54,8 @@ def test_review_renders_briefing_and_ask_form():
     assert r.status_code == 200
     assert "夹带支付改动" in r.text
     assert 'name="session_id"' in r.text and 'action="/ask"' in r.text
+    # 左右分屏:左栏含改动代码
+    assert "改动代码" in r.text and 'class="cols"' in r.text and "pay.py" in r.text
 
 
 def test_review_empty_url_shows_error():
