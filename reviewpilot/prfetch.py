@@ -70,12 +70,27 @@ def fetch_pr(url: str, runner=_default_runner) -> PRData:
     if runner is _default_runner and shutil.which("gh") is None:
         raise PRFetchError("未找到 gh(GitHub CLI)。请安装并 `gh auth login`,或改用本地模式 --local。")
     try:
-        meta = json.loads(runner(["gh", "pr", "view", url, "--json", "title,body"]))
+        meta = json.loads(runner(
+            ["gh", "pr", "view", url, "--json", "title,body,closingIssuesReferences"]))
         diff = runner(["gh", "pr", "diff", url])
     except subprocess.CalledProcessError as exc:
         raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
     return PRData(pr_ref=pr_ref, title=meta.get("title", ""),
-                  body=meta.get("body", ""), diff=diff)
+                  body=meta.get("body", ""), diff=diff,
+                  issue=_format_issues(meta.get("closingIssuesReferences")))
+
+
+def _format_issues(issues) -> str | None:
+    """把 PR 关联(closing)的 issue 拼成意图信号供意图对照用;无则 None。"""
+    if not issues:
+        return None
+    parts = []
+    for it in issues[:3]:
+        title = it.get("title", "")
+        body = (it.get("body") or "").strip()
+        head = f"#{it.get('number', '')} {title}".strip()
+        parts.append(f"{head}\n{body}".strip() if body else head)
+    return "\n\n".join(parts) or None
 
 
 def list_open_prs(repo: str, runner=_default_runner) -> list[dict]:

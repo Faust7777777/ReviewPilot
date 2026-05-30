@@ -19,6 +19,31 @@ def test_fetch_pr_parses_gh_outputs():
     assert data.pr_ref == "o/r#7"
 
 
+def test_fetch_pr_populates_issue_from_closing_refs():
+    def runner(args):
+        if args[:3] == ["gh", "pr", "view"]:
+            return json.dumps({
+                "title": "fix login", "body": "closes #5",
+                "closingIssuesReferences": [
+                    {"number": 5, "title": "登录超时", "body": "弱网下登录会超时"}],
+            })
+        if args[:3] == ["gh", "pr", "diff"]:
+            return "diff"
+        raise AssertionError(args)
+    data = fetch_pr("https://github.com/o/r/pull/7", runner=runner)
+    assert data.issue and "登录超时" in data.issue and "#5" in data.issue
+
+
+def test_fetch_pr_issue_none_when_no_closing_refs():
+    def runner(args):
+        if args[:3] == ["gh", "pr", "view"]:
+            return json.dumps({"title": "t", "body": "b"})
+        if args[:3] == ["gh", "pr", "diff"]:
+            return "diff"
+        raise AssertionError(args)
+    assert fetch_pr("https://github.com/o/r/pull/7", runner=runner).issue is None
+
+
 def test_parse_ref_strips_git_suffix():
     def fake_runner(args):
         if args[:3] == ["gh", "pr", "view"]:
