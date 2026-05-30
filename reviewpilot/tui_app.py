@@ -11,7 +11,7 @@ from functools import partial
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import Footer, Header, Input, Markdown
+from textual.widgets import Footer, Header, Input, Markdown, Static
 
 from reviewpilot.chat import ChatSession
 from reviewpilot.diffnorm import split_diff_by_file
@@ -26,19 +26,21 @@ class ReviewPilotApp(App):
     CSS = """
     #log { height: 1fr; padding: 0 1; }
     #ask { dock: bottom; }
-    Markdown { margin: 0 0 1 0; padding: 0 1; }
+    Markdown, Static { margin: 0 0 1 0; padding: 0 1; }
     .msg-user { background: $primary 12%; border-left: thick $primary; }
     .msg-thinking { color: $text-muted; border-left: thick $warning 60%; }
     .msg-final { border-left: thick $success; }
     """
     BINDINGS = [("escape", "quit", "退出"), ("ctrl+c", "quit", "退出")]
 
-    def __init__(self, resolve_pr, analyze_fn, initial=None):
-        """resolve_pr(text)->PRData;analyze_fn(pr, on_progress)->(briefing_text, session)。"""
+    def __init__(self, services, analyze_fn, initial=None):
+        """services:目标解析能力(interpret/pr_data/local_data/list_prs/repo_latest);
+        analyze_fn(pr, on_progress)->(briefing_text, session)。"""
         super().__init__()
-        self._resolve_pr = resolve_pr
+        self._services = services
         self._analyze_fn = analyze_fn
         self._initial = initial
+        self._pending = None      # 待用户回复的状态:pick(选PR)/ confirm(y-n)
         self._session = None
         self._pr = None
         self._briefing_text = None
@@ -60,14 +62,19 @@ class ReviewPilotApp(App):
         self.query_one("#ask", Input).focus()
         if self._initial:
             await self._user(self._initial)
-            self._analyze(self._initial)
+            self._resolve(self._initial)
 
     # —— 三类消息 ——
     async def _mount(self, label: str, text: str, css: str) -> None:
         self.transcript.append(f"{label}\n{text}")
         log = self.query_one("#log", VerticalScroll)
-        # open_links=False:点击链接不调系统浏览器(WSL 无浏览器会刷屏 xdg-open)
-        await log.mount(Markdown(f"**{label}**\n\n{text}", classes=css, open_links=False))
+        content = f"**{label}**\n\n{text}"
+        # Textual Markdown can deadlock under run_test while mounting nested widgets.
+        # The real TUI keeps Markdown/link behavior; headless tests use plain Static.
+        widget = Static(content, classes=css) if self.is_headless else Markdown(
+            content, classes=css, open_links=False
+        )
+        await log.mount(widget)
         log.scroll_end(animate=False)
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
@@ -104,8 +111,10 @@ class ReviewPilotApp(App):
             await self._handle_command(text)
             return
         await self._user(text)
-        if self._session is None:
-            self._analyze(text)
+        if self._pending is not None:
+            self._resume_pending(text)
+        elif self._session is None:
+            self._resolve(text)
         else:
             self._answer(text)
 
@@ -252,7 +261,7 @@ class ReviewPilotApp(App):
     async def _cmd_quit(self, args: list[str]) -> None:
         self.exit()
 
-    async def _save_current_session(self) -> None:
+    async def _save_current_session(self, messages: list[dict] | None = None) -> None:
         if (
             self._persistence_disabled
             or self._pr is None
@@ -260,12 +269,13 @@ class ReviewPilotApp(App):
             or self._briefing_text is None
         ):
             return
+        messages = messages if messages is not None else self._session.messages
         try:
             self._saved_session_id = await asyncio.to_thread(
                 save_session,
                 self._pr,
                 self._briefing_text,
-                self._session.messages,
+                messages,
                 session_id=self._saved_session_id,
             )
             self._last_persist_error = None
@@ -274,19 +284,64 @@ class ReviewPilotApp(App):
             self._persistence_disabled = True
 
     @work(exclusive=True)
-    async def _analyze(self, text: str) -> None:
+    async def _resolve(self, text: str) -> None:
+        """解析输入意图:pr/local 直接分析;repo 列 PR 选;模糊则 y/n 确认。"""
+        self._set_busy(True, "识别中…")
+        try:
+            target = await asyncio.to_thread(self._services.interpret, text)
+        except Exception as exc:
+            await self._say(f"识别失败:{exc}")
+            self._set_busy(False, "粘贴 PR / repo 链接,或 local")
+            return
+        if target.kind == "pr":
+            await self._fetch_and_analyze(lambda: self._services.pr_data(target.value))
+        elif target.kind == "local":
+            await self._fetch_and_analyze(lambda: self._services.local_data(target.value))
+        elif target.kind == "repo":
+            await self._enter_repo(target.value)
+        elif target.kind == "confirm":
+            self._pending = {"kind": "confirm", "candidate": target.candidate}
+            await self._say(target.question)
+            self._set_busy(False, "回答 y / n")
+        else:  # unknown
+            await self._say("无法识别。请给 PR 链接、`owner/repo#N`、repo 链接,或 `local`。")
+            self._set_busy(False, "粘贴 PR / repo 链接,或 local")
+
+    async def _enter_repo(self, repo: str) -> None:
+        await self._think(f"列出 {repo} 的 open PR…")
+        try:
+            prs = await asyncio.to_thread(self._services.list_prs, repo)
+        except Exception as exc:
+            await self._say(f"列出 PR 失败:{exc}")
+            self._set_busy(False, "换一个链接,或输入 local")
+            return
+        if not prs:
+            await self._think(f"{repo} 无 open PR,改为分析默认分支最新改动…")
+            await self._fetch_and_analyze(lambda: self._services.repo_latest(repo))
+            return
+        lines = [
+            f"{i}. #{pr['number']} {pr['title']}"
+            + (f" — {pr['author']}" if pr.get("author") else "")
+            for i, pr in enumerate(prs, 1)
+        ]
+        self._pending = {"kind": "pick", "repo": repo, "prs": prs}
+        await self._say(f"`{repo}` 的 open PR:\n\n" + "\n".join(lines)
+                        + "\n\n输入编号选择,或直接贴别的链接。")
+        self._set_busy(False, "输入编号选择 PR")
+
+    async def _fetch_and_analyze(self, fetch_callable) -> None:
         self._set_busy(True, "分析中…")
 
         def progress(msg):  # 后台线程 → UI 进度
             self.call_from_thread(self._think, msg)
 
         try:
-            pr = await asyncio.to_thread(self._resolve_pr, text)
+            pr = await asyncio.to_thread(fetch_callable)
             await self._think(f"已获取 {pr.pr_ref},开始分析…")
             briefing_text, session = await asyncio.to_thread(self._analyze_fn, pr, progress)
         except Exception as exc:
             await self._say(f"分析失败:{exc}")
-            self._set_busy(False, "换一个 PR 链接,或输入 local")
+            self._set_busy(False, "换一个链接,或输入 local")
             return
         self._pr = pr
         self._briefing_text = briefing_text
@@ -295,13 +350,51 @@ class ReviewPilotApp(App):
         await self._say(briefing_text)
         self._set_busy(False, "追问 / 反驳…(Esc 退出)")
 
+    @work(exclusive=True)
+    async def _resume_pending(self, text: str) -> None:
+        pending = self._pending
+        self._pending = None
+        reply = text.strip().lower()
+        if pending["kind"] == "confirm":
+            if reply in {"y", "yes", "是", "对", "好", "确定"}:
+                await self._enter_repo(pending["candidate"])
+            elif reply in {"n", "no", "否", "不"}:
+                await self._say("好的,请重新输入要评审的 PR / repo,或 `local`。")
+                self._set_busy(False, "粘贴 PR / repo 链接,或 local")
+            else:
+                self._pending = pending
+                await self._say("请回答 y 或 n。")
+                self._set_busy(False, "回答 y / n")
+            return
+        # pick
+        prs, repo = pending["prs"], pending["repo"]
+        sel = text.strip().lstrip("#")
+        chosen = None
+        if sel.isdigit():
+            n = int(sel)
+            if 1 <= n <= len(prs):
+                chosen = prs[n - 1]
+            else:
+                chosen = next((p for p in prs if p["number"] == n), None)
+        if chosen is None:
+            self._pending = pending
+            await self._say("无效编号,请重新输入,或直接贴链接。")
+            self._set_busy(False, "输入编号选择 PR")
+            return
+        url = f"https://github.com/{repo}/pull/{chosen['number']}"
+        await self._fetch_and_analyze(lambda: self._services.pr_data(url))
+
     @work
     async def _answer(self, question: str) -> None:
         self._set_busy(True, "思考中…")
         try:
             await self._think("正在依据已审 diff 作答…")
-            reply = await asyncio.to_thread(self._session.ask, question)
-            await self._save_current_session()
+            messages = list(self._session.messages)
+            messages.append({"role": "user", "content": question})
+            reply = await asyncio.to_thread(self._session.llm, messages)
+            messages.append({"role": "assistant", "content": reply})
+            await self._save_current_session(messages)
             await self._say(reply)
+            self._session.messages = messages
         finally:
             self._set_busy(False, "追问 / 反驳…(Esc 退出)")
