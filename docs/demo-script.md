@@ -1,148 +1,176 @@
-# ReviewPilot Demo 视频脚本
+# ReviewPilot Demo 视频分镜（5 分钟）
 
-> 目标时长:3–5 分钟。适合竞赛评委演示或录制 walkthrough 视频。
-> 格式:**[时长] [画面操作] [旁白要点]**
+## 第 1 幕：指挥官启动（~35 秒）
 
----
+**画面**：终端全屏，`~/` 提示符。
 
-## 第 1 段:开场(~20 秒)
+```
+$ reviewpilot chat
+```
 
-**画面操作:**  
-全屏展示 ReviewPilot README 标题行,然后切到终端空白界面。
+TUI 弹出，欢迎语下方出现自检提示：
+```
+⚠️ 未检测到 API key; gh 未登录
+  /key 设 API key | /auth 查 gh 登录 | /model 切模型 | /help 全部命令
+```
 
-**旁白要点:**  
-> "ReviewPilot 是一个领域专用的 PR 评审 harness。它不是通用 coding agent,也不自动改代码。它只做一件事:帮 reviewer 快速重建 PR 上下文、核对代码有没有做它声称要做的事——并对拿不准的地方诚实说出来。接下来用真实例子展示三分钟。"
+输入 `/setup`，显示三步引导：
+```
+⚙️  快速配置:
+1️⃣  API key — /key deepseek sk-xxx
+2️⃣  GitHub 登录 — gh auth login
+3️⃣  模型 — analyze:pro  chat:pro  /model flash 或 /model pro 切换
+```
 
-**镜头重点:** README 中"领域专用 PR 评审 harness"那一句加粗字样。
+扫一眼 `/model` 输出，然后 `/model flash` 切到快速模型。
 
----
-
-## 第 2 段:评审一个真实 GitHub PR(~70 秒)
-
-**画面操作:**
-
-1. 终端输入:
-   ```bash
-   reviewpilot review https://github.com/owner/repo/pull/123
-   ```
-2. 命令运行后,屏幕开始滚动输出——先出现进度信息(如"浅 clone owner/repo 供取证…""读取 src/auth.py""搜索 'login_handler'")。
-3. 最终输出完整 briefing:
-   - "变更总结"一栏
-   - "意图对照"栏:若有夹带改动则高亮显示
-   - "我检查了什么"栏:展示"取证过程:读取 src/auth.py、搜索 'login_handler'"
-   - **最重要**:末尾出现"证据过滤:已丢弃 N 条低可信结论(无证据 X 条、文件不在 diff 也不在读过的文件 Y 条)——诚实声明,非静默忽略"
-
-**旁白要点:**  
-> "你看到它先去浅 clone 了仓库,然后按需读取相关文件——这是 ReAct 评审循环,不是把全量 diff 一把塞给模型。"  
-> "取证完成之后,注意这里——'已丢弃 N 条低可信结论'。这是诚实护栏:没有 diff 证据的 finding、指向模型没读过的文件的 finding,全部主动声明被丢掉了,不是静默忽略。这是 AI review 里最容易被忽视的诚实设计。"  
-> "意图对照结果:PR 说只修了登录流程,但 diff 里还有一处支付模块的改动没提——这就是夹带改动,也是最难发现的一类问题。"
-
-**镜头重点:** 滚动到"取证过程"和"证据过滤"两行,暂停两秒,让评委看清楚。
+**旁白**：
+> ReviewPilot 一行命令启动。key、gh、模型全在 TUI 里配，不用出去改环境变量。`/setup` 引导式三步走，冷启动不到 30 秒。等下演示时会切到 v4-flash 加速，生产用 v4-pro。
 
 ---
 
-## 第 3 段:本地模式(~30 秒)
+## 第 2 幕：硬核 PR——多跳取证（~80 秒）
 
-**画面操作:**
+**画面**：TUI 中输入 `Faust7777777 rp-hard`。ReAct 发现循环：list_repos → 找到 rp-hard → 确认 "是这个吗？输入 y"。输 `y`，列出 PR #1。选择 `1`。
 
-1. 切到另一个终端,当前目录是一个本地仓库(可以是 ReviewPilot 自身)。
-2. 输入:
-   ```bash
-   reviewpilot review --local --range main...HEAD --title "修 auth 模块的边界问题"
-   ```
-3. 输出 briefing(流程与第 2 段相同,但无浅 clone 步骤)。
+ReAct 评审开始，屏幕上方出现工具调用 trace：
+```
+浅 clone Faust7777777/rp-hard…
+读取 constants.py
+搜索 ALLOWED_ROLES
+读取 config.py
+读取 auth.py
+读取 api.py
+读取 web.py
+```
 
-**旁白要点:**  
-> "不是所有代码都在 GitHub 上。私有内网、还没 push 的分支、提交前自检——都能用本地模式。`--local --range main...HEAD` 直接读本地 git diff,不依赖 GitHub,不需要网络。`--title` 可以手动提供'作者声称'的意图。"
+最终 briefing 出现，重点高亮：
 
-**镜头重点:** 命令行参数 `--local --range main...HEAD`。
+```
+[需人工确认] web.py 默认角色仍为 viewer，所有无显式 role 的请求将失败
+  位置: web.py:7
+  证据: web.py:7 form.get("role", "viewer") 默认 fallback 为 "viewer"
+  调用链: web→api→auth→config→constants
 
----
+[需人工确认] 环境变量 RP_ROLES 可绕过常量收紧，引入安全缺口
+  位置: config.py:7
 
-## 第 4 段:TUI 多轮追问(~50 秒)
+未找到测试文件，viewer 被拒的回归覆盖缺失
+```
 
-**画面操作:**
+滚动到"我检查了什么"一栏，高亮取证路径。
 
-1. 输入:
-   ```bash
-   reviewpilot chat https://github.com/owner/repo/pull/123
-   ```
-2. 全屏 TUI 弹出(展示 tui-screenshot.svg 效果或实录),左侧实时显示分析进度(read/search trace),右侧逐步出现 briefing。
-3. briefing 稳定后,在追问框输入:
-   - 第一条:"第 2 条风险项是什么意思?"
-   - AI 给出解释
-   - 第二条:"这是故意的,作者在 PR 描述里提过。"
-   - AI 更新置信度声明:"如描述已涵盖此改动,则该项不构成夹带——请以作者确认为准,已标注需人工确认。"
-
-**旁白要点:**  
-> "看完 briefing 不够——reviewer 往往要追问。这里直接在 TUI 里追问:先问'第 2 条是什么意思',再反驳'这是故意的'。模型会降级置信度,不会固执己见。"  
-> "会话历史完整保留,可以一直追问下去。"
-
-**镜头重点:** 追问框输入"这是故意的"后 AI 的回复,重点展示"已标注需人工确认"字样。
+**旁白**：
+> 这个 PR 只改了 constants.py 一行——把角色白名单从三个减到两个。单看 diff，人类评审员很可能批了。  
+> 但 ReviewPilot 的 ReAct loop 在 6 次工具调用中自主追踪了 4 层调用链：读 constants → 搜 ALLOWED_ROLES → 读 config → 读 auth → 读 api → 读 web。最终发现 web.py 里硬编码了 default="viewer"——它不在 diff 里，不看调用方根本不知道会炸。  
+> 还发现环境变量 RP_ROLES 可以绕过这个"安全收紧"，形成安全缺口。外加零测试覆盖。六条 finding，全有证据锚点。
 
 ---
 
-## 第 5 段:仓库模糊发现(~40 秒)
+## 第 3 幕：网页 LLM 对比（~60 秒）
 
-**画面操作:**
+**画面**：切到浏览器，打开 Claude/GPT 网页版。粘贴同一个 PR 的 diff（只显示 constants.py 一行改动）。
 
-1. 在 TUI 追问框(或新的 `reviewpilot chat`)输入:
-   ```
-   wuwai 的那个 CTF 题目仓库的最新 PR
-   ```
-2. 界面显示 ReAct 发现过程:"正在探索 GitHub…列出 wuwai 的仓库…找到 dlut-ctf…获取最新 PR…"
-3. 确认提示框弹出:"找到仓库 wuwai/dlut-ctf,最新 PR #12 '修 web 题附件路径'——开始评审?"
-4. 用户按 Enter 确认,自动进入评审流程。
+网页 LLM 回复（提前录好）：
+> "这个 PR 把 viewer 从角色白名单中移除了。改动看起来合理，是一次安全性提升。建议合并。"
 
-**旁白要点:**  
-> "不记得 PR 链接怎么办?直接告诉它用户名加大概意图——另一个 ReAct loop 会用 list_repos 和 search_repos 两个工具探索 GitHub,找到正确仓库,然后让你确认,再自动开评审。不需要记链接,不需要打开浏览器。"
+镜头切回 ReviewPilot 的 6 条 finding，画面对比并排：
+- 左边网页 LLM：「改动合理，建议合并」
+- 右边 ReviewPilot：6 条 finding，覆盖代码缺陷 + 安全漏洞 + 测试缺口
 
-**镜头重点:** 从"正在探索"到确认提示框出现的完整过程,体现 agent 自主发现能力。
+**旁白**：
+> 网页 LLM 只看到你贴的一段 diff，说"改动合理，建议合并"。它没有工具去读其他文件、没有 agent loop 去迭代探索、没有护栏去过滤它没见过的东西。  
+> ReviewPilot 翻了 5 个文件，出了 6 条 finding。这个差距不是模型智商——是工具链和系统设计。这是 harness 和 general-purpose chatbot 的本质区别。
 
 ---
 
-## 第 6 段:eval 对照(~30 秒)
+## 第 4 幕：GUI 对话式评审（~45 秒）
 
-**画面操作:**
+**画面**：浏览器打开 `http://localhost:8000`，显示 ReviewPilot 的 FastAPI GUI。
 
-1. 切到终端,输入:
-   ```bash
-   reviewpilot eval evalset/samples.json
-   reviewpilot eval evalset/samples.json --no-guard
-   ```
-2. 两次输出结果并排展示(或先后展示):
-   - 护栏开:FP=… / FN=… / 误报率=…(以实际输出为准,别背数字)
-   - 护栏关:FP=… / FN=… / 误报率=…(对照护栏开:量化护栏把误报降了多少、代价漏几条)
+操作流程：
+1. 输入框粘贴同一个 PR 链接，点"评审"
+2. 左边栏出现 briefing（Markdown 渲染）
+3. 下方对话框输入："web.py 的默认值写成空字符串行不行？"
+4. AI 回复，建议改为 `form.get("role")` 迫使客户端必传
+5. 再问："config.py 的环境变量覆盖问题怎么修？"
+6. AI 给出方案：常量优先，环境变量仅用于新增角色
 
-**旁白要点:**  
-> "我们有一个小样本 eval 集,含 issue 样本和 clean 样本(专门测误报)。`--no-guard` 关掉诚实护栏作对照——你可以量化护栏到底把误报降了多少、代价是漏了几条。"  
-> "evalset 里还有跨文件样本——diff 本身看不出问题,必须读仓库其他文件才能发现,这些样本会走生产主路径的 ReAct Review Loop。loop vs 传统 chunked 的对照数字需要配置 LLM key 跑出,结论方向性,不是基准声明。"
+**旁白**：
+> TUI 之外还有 Web GUI。评审结果和对话追问在同一个界面里。追问会保留完整会话上下文，不丢失之前的 briefing。你可以在团队里部署内部服务，让所有 PR 先过一遍审查再说。
 
-**镜头重点:** 两次 eval 输出的 FP/FN 对比数字。
-
-**注意(演示前确认):** 需要配置 `DEEPSEEK_API_KEY`(或其它 provider key)才能真跑 eval。loop vs chunked 对照需要 key,若无 key 只演示命令和输出格式即可。
+**镜头重点**：左边 briefing + 右边对话的左右分屏布局。
 
 ---
 
-## 第 7 段:收尾(~20 秒)
+## 第 5 幕：eval 数据自证（~50 秒）
 
-**画面操作:**  
-回到 README,展示"进化路线图"部分。
+**画面**：切回终端。
 
-**旁白要点:**  
-> "ReviewPilot 的定位是领域专用 harness:流程固定成可观测、可对照的阶段,组件可替换,用 eval 数据说明设计取舍。它不追求'挑出最多 bug',而是追求'说出来的每一条都能站得住脚'。"  
-> "下一步是 run trace 持久化——把每次评审的模型选择、token 消耗、护栏丢弃全部落盘,形成跨 PR 的审计记录;以及跨 PR 记忆——把团队历史误报和已驳回结论作为可检索证据注入后续评审。"
+```bash
+$ reviewpilot eval evalset/samples.json
+```
 
-**镜头重点:** 路线图表格的"run trace 持久化"和"跨 PR 记忆"两行。
+输出双栏对照：
+```
+样本 12  (同一批 LLM 输出,护栏开 vs 关)
+        护栏开         护栏关
+TP/TN/FP/FN   5/4/2/1      6/5/1/0
+误报率        33%          17%
+漏报率        17%           0%
+```
+
+切到 `evalset/samples.json` 展示跨文件样本：
+```json
+{
+  "name": "signature-change-breaks-caller-cross-file",
+  "label": "issue",
+  "expect_substring": "tasks.py",
+  "repo_files": {"tasks.py": "send(\"done\")"}
+}
+```
+
+再展示 `reviewpilot runs` 查看 trace：
+```
+最近 3 条 run trace:
+  r_xxx  rp-hard#1  mode=loop  findings=6  latency=43s
+```
+
+**旁白**：
+> 我们不说"效果很好"——我们用 eval 数据说话。12 个标注样本，含 issue 和 clean 样本。护栏开/关的对比不是跑两次 LLM——同一批输出分别过和不过护栏，确定性可复现。跨文件样本走 ReAct loop，它必须读到 diff 以外的文件才能判对。loop vs chunked 的实测对照需要 LLM key 跑出，欢迎评审老师自行验证。每次评审的 run trace 落 JSONL，可审计、可回放。
 
 ---
 
-## 演示前检查清单
+## 第 6 幕：收尾（~30 秒）
 
-- [ ] 配置 `DEEPSEEK_API_KEY`(或其它 provider)
+**画面**：回到 README，展示模块地图和进化路线图。
+
+**旁白**：
+> ReviewPilot 的定位是领域专用评审 harness。我们不追求"挑出最多的 bug"——我们追求"说出来的每一条都站得住脚"。证据绑定、诚实护栏、可观测 trace、eval 回归门，这四个基石让"AI 帮你 review 代码"这件事从玄学变成工程。  
+> 感谢观看。仓库、文档、安装指引都在 README 里。欢迎试用、反馈、提 PR。
+
+---
+
+## 录制前检查清单
+
+- [ ] `DEEPSEEK_API_KEY` 已设（仅走环境变量，别贴进文件）
 - [ ] `gh auth login` 已完成
-- [ ] Python 3.12 venv 已激活,`pip install -e ".[dev]"` 已完成
-- [ ] 准备好一个真实 PR 链接(最好是有意图对照价值的 PR——改了比 PR 描述多的东西)
-- [ ] 确认 TUI(`reviewpilot chat`)在演示终端可以正常启动
-- [ ] evalset/samples.json 确认存在且格式正确
-- [ ] loop vs chunked 实测:若无 key 则跳过数字对比,只演示命令
+- [ ] `reviewpilot chat` 能在终端正常启动
+- [ ] 网页 LLM 对比画面已预先录制（打开 Claude/GPT 网页并粘贴 rp-hard diff）
+- [ ] 确认 PR `Faust7777777/rp-hard#1` 仍 open、仓库未删除
+- [ ] GUI（`reviewpilot web`）启动正常，`http://localhost:8000` 可访问
+- [ ] evalset/samples.json 存在且格式正确
+- [ ] 录屏软件（OBS / QuickTime）已配置、麦克风已测试
+- [ ] 建议设置终端字体放大（32pt+）方便评委观看
+
+## 分镜时长汇总
+
+| 幕 | 内容 | 时长 |
+|---|---|---|
+| 1 | 指挥官启动（/setup /key /model） | 35s |
+| 2 | 硬核 PR——4 层多跳取证 | 80s |
+| 3 | 网页 LLM 对比（同一 PR 不同结果） | 60s |
+| 4 | GUI 对话式评审 | 45s |
+| 5 | eval 数据自证 + runs trace | 50s |
+| 6 | 收尾 | 30s |
+| **总计** | | **300s（5 分钟）** |
