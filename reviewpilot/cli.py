@@ -121,6 +121,10 @@ class _ChatServices:
         from reviewpilot.prfetch import fetch_repo_latest
         return fetch_repo_latest(repo)
 
+    def search_repos(self, query, owner=""):
+        from reviewpilot.prfetch import search_repos
+        return search_repos(query, owner)
+
 
 def _run_chat_ui(initial: str = None) -> None:
     """tty 下启全屏 TUI(先进界面、再在里面给 PR/repo,看分析过程);否则回退普通多轮。

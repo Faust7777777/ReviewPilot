@@ -120,26 +120,29 @@ def test_repo_link_lists_prs_then_pick():
     assert app._session is session
 
 
-def test_fuzzy_input_confirm_then_lists_prs():
+def test_fuzzy_input_searches_repos_then_pick_lists_prs():
     session = ChatSession(lambda m: "ok", diff="d", title="t", body="b",
                           issue=None, briefing_text="B")
 
     class S:
         def interpret(self, text):
-            return Target("confirm", candidate="facebook/react",
-                          question="你是想评审 `facebook/react` 这个仓库吗?(y/n)")
+            return Target("search", value="yuyt", candidate="fausttttttt")
+        def search_repos(self, query, owner=""):
+            assert query == "yuyt" and owner == "fausttttttt"
+            return [{"full_name": "fausttttttt/yuyt", "description": "demo repo"},
+                    {"full_name": "other/yuyt", "description": ""}]
         def list_prs(self, repo):
-            assert repo == "facebook/react"
+            assert repo == "fausttttttt/yuyt"
             return [{"number": 1, "title": "x", "author": ""}]
 
     app = ReviewPilotApp(S(), lambda pr, on_progress=None: ("BRIEF", session))
 
     async def body(app, pilot):
-        app.query_one("#ask").value = "分析 react"
+        app.query_one("#ask").value = "fausttttttt yuyt"
         await pilot.press("enter")
-        await _wait(pilot, lambda: app._pending and app._pending["kind"] == "confirm")
-        assert "facebook/react" in "\n".join(app.transcript)
-        app.query_one("#ask").value = "y"
+        await _wait(pilot, lambda: app._pending and app._pending["kind"] == "pick_repo")
+        assert "fausttttttt/yuyt" in "\n".join(app.transcript)   # 真实搜索候选
+        app.query_one("#ask").value = "1"                        # 选第 1 个仓库
         await pilot.press("enter")
         await _wait(pilot, lambda: app._pending and app._pending["kind"] == "pick")
 

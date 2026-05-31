@@ -113,6 +113,22 @@ def list_open_prs(repo: str, runner=_default_runner) -> list[dict]:
     ]
 
 
+def search_repos(query: str, owner: str = "", runner=_default_runner) -> list[dict]:
+    """联网搜 GitHub 真实仓库(用户只记得大概名字/内容时)。返回 [{full_name, description}]。
+    owner 作为软关键词加入(不用 --owner 硬过滤,避免用户名拼写不准时搜空)。"""
+    terms = " ".join(t for t in [(query or "").strip(), (owner or "").strip()] if t)
+    if not terms:
+        return []
+    try:
+        raw = runner(["gh", "search", "repos", terms,
+                      "-L", "10", "--json", "fullName,description"])
+    except subprocess.CalledProcessError as exc:
+        raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
+    return [{"full_name": it.get("fullName", ""),
+             "description": (it.get("description") or "").strip()}
+            for it in json.loads(raw) if it.get("fullName")]
+
+
 def fetch_repo_latest(repo: str, runner=_default_runner) -> PRData:
     try:
         commits = json.loads(runner(["gh", "api", f"repos/{repo}/commits?per_page=1"]))
