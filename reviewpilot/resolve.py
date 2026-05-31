@@ -24,22 +24,30 @@ def interpret_target(text: str, llm=None) -> Target:
 
     if llm is None:
         return Target("unknown")
+    # 不让 LLM"编"仓库;只抽取联网搜索线索(用户名 + 关键词),交给 gh search 找真实仓库
     prompt = (
-        "用户想评审一个 GitHub 仓库,但输入可能不规范(用空格代替斜杠、大小写/拼写不准、"
-        "只给项目名)。请尽量解析成最可能的 owner/repo,例如:"
-        "'facebook react'->facebook/react;'fausttttttt yuyt'->fausttttttt/yuyt;"
-        "'react'->facebook/react。完全无法判断才返回 NONE。"
-        "只输出 owner/repo 或 NONE,不要任何解释或标点。\n用户输入:" + s
+        "用户想找一个 GitHub 仓库来评审,但只记得大概(用户名 / 关键词 / 内容描述)。"
+        '请抽取用于联网搜索的线索,只输出 JSON:{"owner": <GitHub 用户名,没有就空字符串>, '
+        '"query": <搜索关键词,通常是仓库名或内容词>}。'
+        '完全无法判断就输出 {"owner":"","query":""}。只输出 JSON,不要解释。\n输入:' + s
     )
-    candidate = (llm(prompt) or "").strip().strip("`").strip()
-    if not candidate or candidate.upper() == "NONE":
+    data = _parse_json_obj(llm(prompt) or "")
+    owner = str(data.get("owner") or "").strip()
+    query = str(data.get("query") or "").strip()
+    if not owner and not query:
         return Target("unknown")
+    return Target("search", value=query, candidate=owner)
+
+
+def _parse_json_obj(text: str) -> dict:
+    """从 LLM 输出里宽容地取第一个 JSON 对象({...});失败返回 {}。"""
+    import json
+    import re
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        return {}
     try:
-        repo = parse_repo(candidate)
-    except PRFetchError:
-        return Target("unknown")
-    return Target(
-        "confirm",
-        candidate=repo,
-        question=f"你是想评审 `{repo}` 这个仓库吗?(y/n)",
-    )
+        obj = json.loads(m.group(0))
+        return obj if isinstance(obj, dict) else {}
+    except json.JSONDecodeError:
+        return {}

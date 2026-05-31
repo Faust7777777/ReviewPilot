@@ -3,7 +3,22 @@ import subprocess
 
 import pytest
 
-from reviewpilot.prfetch import fetch_pr, fetch_local, PRData, PRFetchError
+from reviewpilot.prfetch import (
+    fetch_pr, fetch_local, search_repos, PRData, PRFetchError)
+
+
+def test_search_repos_parses_results():
+    def runner(args):
+        assert args[:3] == ["gh", "search", "repos"]
+        return json.dumps([
+            {"fullName": "facebook/react", "description": "A JS library"},
+            {"fullName": "vuejs/vue", "description": None},
+            {"fullName": "", "description": "skip-me"},
+        ])
+    res = search_repos("react", owner="", runner=runner)
+    assert res[0]["full_name"] == "facebook/react" and res[0]["description"] == "A JS library"
+    assert res[1]["description"] == ""           # None 归一化为空串
+    assert all(r["full_name"] for r in res)      # 空 full_name 被过滤
 
 def test_fetch_pr_parses_gh_outputs():
     def fake_runner(args):

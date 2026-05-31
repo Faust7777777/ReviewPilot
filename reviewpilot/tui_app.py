@@ -299,13 +299,31 @@ class ReviewPilotApp(App):
             await self._fetch_and_analyze(lambda: self._services.local_data(target.value))
         elif target.kind == "repo":
             await self._enter_repo(target.value)
-        elif target.kind == "confirm":
-            self._pending = {"kind": "confirm", "candidate": target.candidate}
-            await self._say(target.question)
-            self._set_busy(False, "回答 y / n")
+        elif target.kind == "search":
+            await self._search(target.value, target.candidate or "")
         else:  # unknown
             await self._say("无法识别。请给 PR 链接、`owner/repo#N`、repo 链接,或 `local`。")
             self._set_busy(False, "粘贴 PR / repo 链接,或 local")
+
+    async def _search(self, query: str, owner: str) -> None:
+        await self._think(f"联网搜索仓库:{(query + ' ' + owner).strip()}…")
+        try:
+            repos = await asyncio.to_thread(self._services.search_repos, query, owner)
+        except Exception as exc:
+            await self._say(f"搜索失败:{exc}")
+            self._set_busy(False, "换个关键词,或贴链接")
+            return
+        if not repos:
+            await self._say("没搜到匹配的仓库。换个关键词,或直接贴 PR/repo 链接。")
+            self._set_busy(False, "换个关键词,或贴链接")
+            return
+        lines = [
+            f"{i}. {r['full_name']}" + (f" — {r['description'][:60]}" if r.get("description") else "")
+            for i, r in enumerate(repos, 1)
+        ]
+        self._pending = {"kind": "pick_repo", "repos": repos}
+        await self._say("搜到这些仓库:\n\n" + "\n".join(lines) + "\n\n输入编号选择,或贴链接。")
+        self._set_busy(False, "输入编号选择仓库")
 
     async def _enter_repo(self, repo: str) -> None:
         await self._think(f"列出 {repo} 的 open PR…")
@@ -354,19 +372,18 @@ class ReviewPilotApp(App):
     async def _resume_pending(self, text: str) -> None:
         pending = self._pending
         self._pending = None
-        reply = text.strip().lower()
-        if pending["kind"] == "confirm":
-            if reply in {"y", "yes", "是", "对", "好", "确定"}:
-                await self._enter_repo(pending["candidate"])
-            elif reply in {"n", "no", "否", "不"}:
-                await self._say("好的,请重新输入要评审的 PR / repo,或 `local`。")
-                self._set_busy(False, "粘贴 PR / repo 链接,或 local")
-            else:
+        if pending["kind"] == "pick_repo":
+            repos = pending["repos"]
+            sel = text.strip()
+            chosen = repos[int(sel) - 1] if sel.isdigit() and 1 <= int(sel) <= len(repos) else None
+            if chosen is None:
                 self._pending = pending
-                await self._say("请回答 y 或 n。")
-                self._set_busy(False, "回答 y / n")
+                await self._say("无效编号,请重新输入,或贴链接。")
+                self._set_busy(False, "输入编号选择仓库")
+                return
+            await self._enter_repo(chosen["full_name"])
             return
-        # pick
+        # pick (PR)
         prs, repo = pending["prs"], pending["repo"]
         sel = text.strip().lstrip("#")
         chosen = None
