@@ -53,3 +53,20 @@ def test_summary_without_file_is_not_filtered_by_diff_files():
         Finding(kind=FindingKind.SUMMARY, title="summary no file"),
     ], diff=diff)
     assert [f.title for f in out] == ["summary no file"]
+
+
+_DIFF_A = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+
+def test_keeps_finding_about_read_file_outside_diff():
+    # ReAct loop 读了 caller.py(不在 diff)发现调用方问题 → 应保留(grounded by read_files)
+    f = Finding(kind=FindingKind.RISK, title="调用方未处理新异常",
+                file="caller.py", evidence="caller.py:10")
+    out = apply_guardrail([f], diff=_DIFF_A, read_files=["caller.py"])
+    assert [x.title for x in out] == ["调用方未处理新异常"]
+
+
+def test_drops_finding_in_neither_diff_nor_read_files():
+    f = Finding(kind=FindingKind.RISK, title="幻觉", file="ghost.py", evidence="ghost.py:1")
+    out = apply_guardrail([f], diff=_DIFF_A, read_files=["caller.py"])
+    assert out == []
