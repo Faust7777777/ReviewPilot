@@ -1,4 +1,5 @@
 import argparse
+import json
 import time
 from functools import partial
 
@@ -294,7 +295,13 @@ def main(argv=None):
     _add_pr_source_args(sub.add_parser("chat"))
     ev = sub.add_parser("eval")
     ev.add_argument("samples", help="带标注的样本集 JSON,如 evalset/samples.json")
-    ev.add_argument("--no-guard", action="store_true", help="关闭诚实护栏(用于对照)")
+    ev.add_argument(
+        "--no-guard",
+        action="store_true",
+        help="仅输出护栏关(旧接口,推荐不加该参数看双栏)",
+    )
+    runs = sub.add_parser("runs")
+    runs.add_argument("--limit", type=int, default=10, help="显示最近 N 条(默认 10)")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "review":
@@ -313,17 +320,44 @@ def main(argv=None):
                 initial = args.pr_url
             _run_chat_ui(initial)
         elif args.cmd == "eval":
-            from reviewpilot.evaluate import load_samples, evaluate
+            from reviewpilot.evaluate import load_samples, evaluate_pair
             from reviewpilot.llm import chat_tools
 
-            result = evaluate(
+            pair = evaluate_pair(
                 load_samples(args.samples),
                 llm=_EVAL_LLM,
-                apply_guard=not args.no_guard,
                 chat_tools=partial(chat_tools, stage="eval"),
                 chat=partial(chat, stage="eval"),
             )
-            print(result.summary())
+            if args.no_guard:
+                print(pair.unguarded.summary())
+            else:
+                print(pair.summary())
+        elif args.cmd == "runs":
+            from reviewpilot.runlog import _runs_path
+
+            path = _runs_path()
+            if path is None or not path.exists():
+                print("(暂无 run trace 记录)")
+                return
+            lines = []
+            with open(path, encoding="utf-8") as fh:
+                for ln in fh:
+                    try:
+                        r = json.loads(ln)
+                        lines.append(
+                            f"  {r.get('run_id', '?')}  {r.get('pr_ref', '?')}  "
+                            f"mode={r.get('mode', '?')}  findings={r.get('n_findings', 0)}  "
+                            f"latency={r.get('latency_s', 0)}s"
+                        )
+                    except json.JSONDecodeError:
+                        lines.append("  (解析失败)")
+            shown = lines[-args.limit :] if args.limit > 0 else lines
+            if not shown:
+                print("(暂无 run trace 记录)")
+            else:
+                print(f"最近 {len(shown)} 条 run trace:\n")
+                print("\n".join(shown))
     except PRFetchError as exc:
         print(f"⚠️  {exc}")
         raise SystemExit(2)
