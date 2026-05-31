@@ -5,6 +5,7 @@
 """
 from reviewpilot.analyzer import parse_findings
 from reviewpilot.models import Finding
+from reviewpilot.prompts import load as load_prompt
 
 _TOOLS = [
     {"type": "function", "function": {
@@ -25,19 +26,8 @@ _TOOLS = [
     }},
 ]
 
-_SYSTEM = (
-    "你是只读代码评审助手。你看到一个 PR 的 diff 与作者声称的意图。"
-    "你可以调用 read_file / search 按需读取仓库其它部分来取证(只读,不改代码),"
-    "例如看被改函数的调用方、相关配置、测试是否覆盖。取证够了就停止调用工具。"
-    "重点:意图对照(改的和声称的一致吗、有无夹带)、逻辑/边界风险、测试缺口、接口影响。"
-)
-
-_FINISH = (
-    "现在基于 diff 和你读到的内容,只输出 JSON 数组(不要解释),每个元素字段:"
-    "kind(summary|intent_mismatch|risk|suggestion), title, file, line_start, line_end, "
-    "evidence(引用具体代码/行), confidence(high|check_manually), rationale, needs_human(bool)。"
-    "每条结论必须有证据;没有证据就不要输出该条。"
-)
+_SYSTEM = load_prompt("SYSTEM")
+_FINISH = load_prompt("FINISH")
 
 
 def run_review_loop(diff, title, body, issue, workspace, chat_tools, chat,
