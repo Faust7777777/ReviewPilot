@@ -27,8 +27,8 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 | Provider / model 抽象 | ✅ 有 | litellm + 按前缀选原生 key + 分阶段模型(PR #13) |
 | 权限 / 沙箱 | 🟡 部分 | 工具全只读 + 路径穿越防护 + step cap;未做进程级沙箱 |
 | 配置体系 | 🟡 部分 | 分阶段模型;缺 profile / 预算 / 超时 |
-| 可观测 / trace | 🟡 部分 | Loop 取证 trace 露出在 briefing(#41);TUI 会话已落盘(`sessions_store`),但结构化 run trace(run_id/token/各阶段模型/护栏丢弃原因)未落盘 |
-| Eval / 回归 | 🟡 有但未覆盖核心 | 小样本 FP/FN + 护栏 A/B 对照(亮点);但当前走 `analyze_chunked` 回退路径,**尚未覆盖 ReAct review_loop**,且缺"必须读仓库才能发现"的样本 |
+| 可观测 / trace | 🟡 部分 | Loop 取证 trace + **护栏丢弃原因**已在 briefing 诚实展示(#41/#46);TUI 会话已落盘(`sessions_store`);但结构化 run trace(run_id/token/各阶段模型)仍未落盘 |
+| Eval / 回归 | 🟡 已覆盖核心(实测待跑) | 小样本 FP/FN + 护栏 A/B 对照;**已能走 ReAct review_loop**(DictWorkspace)并加了"必须读 caller 才能发现"的跨文件样本(#47);loop vs chunked 的实测对照待带 key 跑 |
 | Agent 指令 / system prompt | ✅ 有(本轮外置) | 评审员系统提示 = `review_loop._SYSTEM/_FINISH` + `analyzer`/`chat` 模板,本轮从代码字符串外置为 `reviewpilot/prompts/reviewer.md`(可版本化/审计) |
 | CI / Back-Pressure | ✅ 本轮 | `.github/workflows/ci.yml`:push/PR 自动跑 pytest,把回归门接进合并回路 |
 
@@ -39,7 +39,7 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 1. ✅ 仓库级**只读上下文工具**:`read_file` / `search`(`workspace.py`,PR #40)。
 2. ✅ 受限 **review loop**:模型按需取证,≤N 步,只读,全程 trace(`review_loop.py`,PR #40)。
 3. ✅ **evidence validator**:finding 的 file 必须落在 diff 改动文件 ∪ 读过的文件,否则当幻觉丢弃(`guardrail`,本轮)。
-4. 🟡 **run trace**:Loop trace 已展示、TUI 会话已落盘(`sessions_store`);但结构化 run trace(run_id/token/各阶段模型/护栏丢弃原因)未落盘。
+4. 🟡 **run trace**:Loop trace + 护栏丢弃原因已展示、TUI 会话已落盘(`sessions_store`);但结构化 run trace(run_id/token/各阶段模型)未落盘。
 5. ✅ 生产与 eval **共用同一 pipeline**(PR #33)。
 
 ## 4. 进化路线图
@@ -50,15 +50,15 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 | ② | **受限只读 ReAct review loop + 工具集** | ✅ PR #40(取证 trace 露出 #41,证据校验 #42) |
 | 工程约定 | 根 `AGENTS.md`(对开发 agent 友好,非 agent 指令组件)+ CI 回归门(Back-Pressure) | ✅ 本轮 |
 | ③ | 评审员系统提示外置为 `reviewpilot/prompts/reviewer.md`(可版本化/审计) | ✅ 本轮 |
-| ④ 已排期 | **run trace 持久化**(run_id + 各阶段模型/token/findings/护栏丢弃原因,JSONL→SQLite) | 📅 |
-| ⑤ 已排期 | 扩 eval:让 eval **走 review_loop** + 加"必须读仓库才能发现"的样本,证明 ReAct 价值 | 📅 |
+| ④ 已排期 | **run trace 持久化**(护栏丢弃原因已露出 #46;run_id + 各阶段模型/token/findings 落盘 JSONL→SQLite 待做) | 📅 |
+| ⑤ | 扩 eval:让 eval **走 review_loop** + 加"必须读仓库才能发现"的样本 | ✅ 本轮(#47;机制+样本,实测对照待跑) |
 | ⑥ | 配置体系:每请求超时 / 重试 / 预算 / provider fallback | ⬜ |
 | ⑦ | 跨 PR 记忆:团队规则/历史误报/已驳回结论,作为可检索证据注入 | ⬜ |
 
 ## 5. 已知短板(诚实记录)
 
-- 已修:关联 issue 填充(PR #30/#34)、diffnorm rename/删除/binary 取名(#32)、护栏证据校验(#42)、根 `AGENTS.md` + CI 回归门、评审员系统提示外置为 `reviewpilot/prompts/reviewer.md`(本轮)。
-- 仍在:结构化 run trace 未落盘(TUI 会话已落盘,但缺 run_id/token/各阶段模型/护栏丢弃原因);**eval 当前走 `analyze_chunked` 回退路径、尚未覆盖 ReAct review_loop**,且缺"必须读仓库才能发现"的样本;`chat` 追问仍只带 diff+历史,未接 Review Loop 的按需取证。
+- 已修:关联 issue 填充(PR #30/#34)、diffnorm rename/删除/binary 取名(#32)、护栏证据校验(#42)、根 `AGENTS.md` + CI 回归门(#43)、评审员系统提示外置(#44)、仓库搜索改广搜修 422(#45)、护栏失败读取漏洞 + 丢弃可观测(#46)、eval 可走 review_loop + 跨文件样本(#47)。
+- 仍在:结构化 run trace 未落盘(TUI 会话与护栏丢弃已可见,但缺 run_id/token/各阶段模型的持久化记录);eval 的"loop vs chunked"实测对照待带 key 跑(机制与样本已具备);`chat` 追问仍只带 diff+历史,未接 Review Loop 的按需取证;配置体系(超时/重试/预算/fallback)与进程级沙箱未做。
 
 ## 6. 论证:为什么"领域 harness"这个定位立得住
 
