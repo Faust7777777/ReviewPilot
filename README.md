@@ -98,11 +98,18 @@ export RP_MODEL_EVAL=deepseek/deepseek-v4-flash
 ### 6. eval 对照
 
 ```bash
-reviewpilot eval evalset/samples.json            # 护栏开
-reviewpilot eval evalset/samples.json --no-guard # 护栏关,对照
+reviewpilot eval evalset/samples.json            # 双栏:护栏开 vs 关(同一批 LLM 输出,确定性对照)
+reviewpilot eval evalset/samples.json --no-guard # 仅护栏关(旧接口)
 ```
 
-输出 TP/TN/FP/FN 与误报率/漏报率。跨文件样本(含 `repo_files` 字段)会走生产主路径 ReAct Review Loop。loop vs chunked 的实测对照需配置 LLM key 跑出,结论方向性,非基准证明。
+输出 TP/TN/FP/FN 与误报率/漏报率，并排展示护栏 on/off 的净效果。跨文件样本走 ReAct Review Loop。loop vs chunked 的实测对照需带 key 跑。
+
+### 7. 查看 run trace
+
+```bash
+reviewpilot runs                 # 最近 10 条
+reviewpilot runs --limit 20      # 最近 20 条
+```
 
 ---
 
@@ -156,9 +163,10 @@ GUI (web.py) ────────────┘     → workspace(只读仓
 | `reviewpilot/briefing.py` | 渲染一页 reviewer briefing(终端/Markdown) |
 | `reviewpilot/resolve.py` | 仓库发现 ReAct loop:LLM 用 list_repos/search_repos 探索 GitHub |
 | `reviewpilot/chat.py` | 多轮追问会话管理(ChatSession) |
-| `reviewpilot/evaluate.py` | 小样本 eval:FP/FN + 护栏 on/off 对照;跨文件样本走 review_loop |
+| `reviewpilot/runlog.py` | 结构化 run trace JSONL 落盘;`reviewpilot runs` 可读;`RP_RUN_LOG` 覆盖/禁用 |
+| `reviewpilot/evaluate.py` | 小样本 eval:FP/FN + 确定性护栏 A/B 双栏对照(`evaluate_pair`) |
 | `reviewpilot/web.py` | 薄 GUI(FastAPI):表单 → 左右分屏 briefing + 对话式追问 |
-| `reviewpilot/cli.py` / `llm.py` | CLI 接线(review/chat/eval) + litellm 适配(分阶段模型) |
+| `reviewpilot/cli.py` / `llm.py` | CLI 接线(review/chat/eval/runs) + litellm 适配(分阶段模型,带 timeout) |
 | `reviewpilot/prompts/` | 评审员/发现系统提示(外置 Markdown,可版本化/审计) |
 
 ---

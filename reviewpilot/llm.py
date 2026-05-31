@@ -4,6 +4,7 @@
 (deepseek/* → DEEPSEEK_API_KEY,openai/* → OPENAI_API_KEY,anthropic/* → ANTHROPIC_API_KEY),
 不再硬绑 DeepSeek。模型解析优先级:显式 override > 阶段 env(RP_MODEL_<STAGE>)> RP_MODEL > 默认。
 """
+
 import os
 import warnings
 
@@ -28,15 +29,22 @@ def resolve_model(stage: str | None = None, override: str | None = None) -> str:
     return os.environ.get("RP_MODEL", DEFAULT_MODEL)
 
 
-def chat(messages: list[dict], model: str | None = None, stage: str | None = None) -> str:
+def chat(
+    messages: list[dict],
+    model: str | None = None,
+    stage: str | None = None,
+    timeout: float = 60.0,
+) -> str:
     import warnings
     import litellm
-    with warnings.catch_warnings():  # 静音 litellm 内部的 pydantic 序列化 UserWarning
+
+    with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         resp = litellm.completion(
             model=resolve_model(stage, model),
             messages=messages,
             temperature=0,
+            timeout=timeout,
         )
     return resp.choices[0].message.content
 
@@ -45,8 +53,13 @@ def complete(prompt: str, model: str | None = None, stage: str | None = None) ->
     return chat([{"role": "user", "content": prompt}], model=model, stage=stage)
 
 
-def chat_tools(messages: list[dict], tools: list[dict],
-               model: str | None = None, stage: str | None = None) -> dict:
+def chat_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+    stage: str | None = None,
+    timeout: float = 60.0,
+) -> dict:
     """带工具(function-calling)的一步对话。返回 {content, calls, assistant_msg}:
     - calls: [{id, name, args(dict)}] 模型本步要调的工具(已解析参数)
     - assistant_msg: 供把本步回填进 messages 继续多轮(含 API 格式的 tool_calls)
@@ -54,6 +67,7 @@ def chat_tools(messages: list[dict], tools: list[dict],
     import json
     import warnings
     import litellm
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         resp = litellm.completion(
@@ -62,6 +76,7 @@ def chat_tools(messages: list[dict], tools: list[dict],
             tools=tools,
             tool_choice="auto",
             temperature=0,
+            timeout=timeout,
         )
     msg = resp.choices[0].message
     raw_calls = msg.tool_calls or []
@@ -75,8 +90,18 @@ def chat_tools(messages: list[dict], tools: list[dict],
     assistant_msg = {"role": "assistant", "content": msg.content or ""}
     if raw_calls:
         assistant_msg["tool_calls"] = [
-            {"id": tc.id, "type": "function",
-             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
             for tc in raw_calls
         ]
-    return {"content": msg.content or "", "calls": calls, "assistant_msg": assistant_msg}
+    return {
+        "content": msg.content or "",
+        "calls": calls,
+        "assistant_msg": assistant_msg,
+    }

@@ -75,19 +75,38 @@ def test_help_command_lists_commands_without_starting_analysis():
     assert app._session is None
 
 
-def test_model_chat_command_updates_environment(monkeypatch):
+def test_model_command_toggles_flash_pro(monkeypatch):
     monkeypatch.delenv("RP_MODEL_CHAT", raising=False)
+    monkeypatch.delenv("RP_MODEL_ANALYZE", raising=False)
     app = ReviewPilotApp(_StubServices(), lambda pr, on_progress=None: None)
 
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one("#ask").value = "/model chat foo"
+            app.query_one("#ask").value = "/model pro"
             await pilot.press("enter")
             await pilot.pause()
 
     _run(scenario())
-    assert os.environ["RP_MODEL_CHAT"] == "foo"
+    assert os.environ["RP_MODEL_ANALYZE"] == "deepseek/deepseek-v4-pro"
+    assert os.environ["RP_MODEL_CHAT"] == "deepseek/deepseek-v4-pro"
+
+
+def test_model_command_shows_current_without_args(monkeypatch):
+    monkeypatch.setenv("RP_MODEL_ANALYZE", "deepseek/deepseek-v4-pro")
+    monkeypatch.setenv("RP_MODEL_CHAT", "deepseek/deepseek-v4-flash")
+    app = ReviewPilotApp(_StubServices(), lambda pr, on_progress=None: None)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one("#ask").value = "/model"
+            await pilot.press("enter")
+            await pilot.pause()
+            text = "\n".join(app.transcript)
+            assert "v4-pro" in text and "v4-flash" in text
+
+    _run(scenario())
 
 
 def test_files_and_diff_commands_after_analysis(tmp_path, monkeypatch):
