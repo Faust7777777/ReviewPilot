@@ -40,3 +40,20 @@ def test_inspection_flags_oversized_change_honestly():
 def test_inspection_small_change_has_no_oversized_note():
     _summary, _inspected, limitations = build_inspection(DIFF, [])
     assert not any("超出一次可信" in x for x in limitations)
+
+
+def test_inspection_surfaces_review_trace():
+    trace = [
+        {"tool": "read_file", "args": {"path": "auth.py"}},
+        {"tool": "search", "args": {"query": "login"}},
+        {"tool": "read_file", "args": {"path": "auth.py"}},   # 去重
+    ]
+    _summary, inspected, _lim = build_inspection(DIFF, [], trace=trace)
+    note = next(c.note for c in inspected if c.dimension == "取证过程")
+    assert "auth.py" in note and "login" in note
+    assert note.count("auth.py") == 1   # 去重
+
+
+def test_inspection_no_trace_section_without_trace():
+    _s, inspected, _l = build_inspection(DIFF, [])
+    assert not any(c.dimension == "取证过程" for c in inspected)
