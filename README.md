@@ -221,7 +221,7 @@ GUI (web.py) ────────────┘     → workspace(只读仓
 
 ## demo 视频
 
-<demo 视频链接待补>
+(https://www.bilibili.com/video/BV1aTVQ6iEiJ/) 
 
 脚本/分镜见 [`docs/demo-script.md`](docs/demo-script.md)。
 
