@@ -62,6 +62,9 @@ def _classify_gh_error(stderr: str) -> str:
         return "触发 GitHub API 速率限制,请稍后再试。"
     if "saml" in s or "sso" in s:
         return "该组织启用 SSO,请为 token 授权 SSO 后重试。"
+    if "invalid search query" in s or "cannot be searched" in s:
+        return ("没搜到匹配的用户或仓库——用户名/仓库名可能拼写有误,或仓库为私有不可见。"
+                "请检查拼写、换个关键词,或直接粘贴仓库 / PR 链接。")
     return f"gh 调用失败:{(stderr or '').strip()[:200]}"
 
 
@@ -114,23 +117,17 @@ def list_open_prs(repo: str, runner=_default_runner) -> list[dict]:
 
 
 def search_repos(query: str, owner: str = "", runner=_default_runner) -> list[dict]:
-    """联网搜 GitHub 真实仓库(用户只记得大概名字/内容时)。返回 [{full_name, description}]。
-    owner 用 --owner 限定(能精确搜到该用户的仓库);若搜空(如 owner 拼错)再回退广搜关键词。"""
-    q, ow = (query or "").strip(), (owner or "").strip()
-    base = ["gh", "search", "repos", "-L", "10", "--json", "fullName,description"]
-    attempts = []
-    if ow:
-        attempts.append(base + ["--owner", ow] + ([q] if q else []))
-    if q:
-        attempts.append(base + [q])  # 回退:不限 owner 的广搜(owner 拼错/不在文本时)
-    rows = []
-    for args in attempts:
-        try:
-            rows = json.loads(runner(args))
-        except subprocess.CalledProcessError as exc:
-            raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
-        if rows:
-            break
+    """联网搜 GitHub 真实仓库(用户只记得大概名字/作者时)。返回 [{full_name, description}]。
+    不用 --owner 做硬过滤——它会过度约束,且 owner 拼错时 gh 直接 422 报错。改为把作者与
+    关键词一并当作普通搜索词广搜,让 GitHub 模糊匹配,候选交用户确认(grounded 在真实结果上)。"""
+    terms = " ".join(t for t in [(query or "").strip(), (owner or "").strip()] if t)
+    if not terms:
+        return []
+    args = ["gh", "search", "repos", "-L", "10", "--json", "fullName,description", terms]
+    try:
+        rows = json.loads(runner(args))
+    except subprocess.CalledProcessError as exc:
+        raise PRFetchError(_classify_gh_error(getattr(exc, "stderr", "") or "")) from exc
     return [{"full_name": it.get("fullName", ""),
              "description": (it.get("description") or "").strip()}
             for it in rows if it.get("fullName")]

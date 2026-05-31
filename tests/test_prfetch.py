@@ -20,6 +20,39 @@ def test_search_repos_parses_results():
     assert res[1]["description"] == ""           # None 归一化为空串
     assert all(r["full_name"] for r in res)      # 空 full_name 被过滤
 
+
+def test_search_repos_broad_search_without_owner_filter():
+    # 去掉 --owner 硬过滤:作者与关键词一并当普通搜索词广搜(避免 422 / 过度约束)
+    seen = []
+    def runner(args):
+        seen.append(args)
+        return json.dumps([{"fullName": "real/yuyt", "description": "hit"}])
+    res = search_repos("yuyt", owner="typo", runner=runner)
+    assert res == [{"full_name": "real/yuyt", "description": "hit"}]
+    flat = " ".join(seen[0])
+    assert "--owner" not in seen[0] and "user:" not in flat   # 无硬过滤
+    assert "yuyt" in flat and "typo" in flat                  # 作者+关键词都进了广搜词
+
+
+def test_search_repos_empty_terms_returns_empty_without_calling_gh():
+    called = []
+    search_repos("", owner="", runner=lambda a: called.append(a) or "[]")
+    assert called == []                              # 无搜索词时不调 gh
+
+
+def test_search_repos_wraps_gh_errors_as_prfetcherror():
+    def runner(args):
+        raise subprocess.CalledProcessError(1, args, stderr="HTTP 503 upstream")
+    with pytest.raises(PRFetchError):
+        search_repos("yuyt", owner="", runner=runner)
+
+
+def test_classify_gh_error_friendly_for_invalid_search_query():
+    from reviewpilot.prfetch import _classify_gh_error
+    msg = _classify_gh_error('Invalid search query "user:x". ... cannot be searched ...')
+    assert ("拼写" in msg) or ("没搜到" in msg)
+    assert "Invalid search query" not in msg         # 不把裸错误甩给用户
+
 def test_fetch_pr_parses_gh_outputs():
     def fake_runner(args):
         if args[:3] == ["gh", "pr", "view"]:
