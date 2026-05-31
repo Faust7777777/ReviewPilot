@@ -1,7 +1,30 @@
 import argparse
 import json
+import os
 import time
 from functools import partial
+
+
+_DEMO_EVAL = """\
+样本 12  (同一批 LLM 输出,护栏开 vs 关)
+        护栏开         护栏关
+TP/TN/FP/FN   5/4/2/1      6/4/1/1
+误报率        33%          17%
+漏报率        17%          17%
+
+  [TP] signature-change-breaks-caller-cross-file (issue) —— ReAct loop 读了 tasks.py 才发现
+  [TP] security-role-removal-viewer (issue)
+  [TP] env-var-bypass-security-fix (issue)
+  [TN] clean-add-test-only (clean)
+  [TN] clean-refactor-extract-method (clean)
+  [TN] clean-doc-update (clean)
+  [TN] clean-fix-typo (clean)
+  [FP] clean-add-config-validation (clean)
+  [FP] clean-add-health-endpoint (clean)
+  [FN] issue-concurrent-access-race (issue)
+  [TP] issue-sql-injection-input (issue)
+  [TP] issue-unsafe-deserialize (issue)
+"""
 
 from reviewpilot.prfetch import fetch_pr, fetch_local, _default_runner, PRFetchError
 from reviewpilot.analyzer import analyze_chunked
@@ -307,6 +330,7 @@ def main(argv=None):
         action="store_true",
         help="仅输出护栏关(旧接口,推荐不加该参数看双栏)",
     )
+    ev.add_argument("--demo", action="store_true", help="展示样例输出(无需 API key)")
     runs = sub.add_parser("runs")
     runs.add_argument("--limit", type=int, default=10, help="显示最近 N 条(默认 10)")
     args = parser.parse_args(argv)
@@ -327,6 +351,9 @@ def main(argv=None):
                 initial = args.pr_url
             _run_chat_ui(initial)
         elif args.cmd == "eval":
+            if args.demo:
+                print(_DEMO_EVAL)
+                return
             from reviewpilot.evaluate import load_samples, evaluate_pair
             from reviewpilot.llm import chat_tools
 
