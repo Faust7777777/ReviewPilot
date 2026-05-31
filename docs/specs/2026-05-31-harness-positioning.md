@@ -29,8 +29,10 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 | 配置体系 | 🟡 部分 | 分阶段模型;缺 profile / 预算 / 超时 |
 | 可观测 / trace | 🟡 部分 | Loop 取证 trace 露出在 briefing(#41);TUI 会话已落盘(`sessions_store`),但结构化 run trace(run_id/token/各阶段模型/护栏丢弃原因)未落盘 |
 | Eval / 回归 | 🟡 有但未覆盖核心 | 小样本 FP/FN + 护栏 A/B 对照(亮点);但当前走 `analyze_chunked` 回退路径,**尚未覆盖 ReAct review_loop**,且缺"必须读仓库才能发现"的样本 |
-| Agent 指令(AGENTS.md) | ✅ 本轮 | 根 `AGENTS.md`:模块地图 + 硬约束(只读/证据绑定/密钥走 env)+ 改动后必跑 pytest/eval |
+| Agent 指令 / system prompt | ✅ 有(本轮外置) | 评审员系统提示 = `review_loop._SYSTEM/_FINISH` + `analyzer`/`chat` 模板,本轮从代码字符串外置为 `reviewpilot/prompts/reviewer.md`(可版本化/审计) |
 | CI / Back-Pressure | ✅ 本轮 | `.github/workflows/ci.yml`:push/PR 自动跑 pytest,把回归门接进合并回路 |
+
+> 注:根目录 `AGENTS.md`(本轮新增)是"让本仓库对**开发 ReviewPilot 的 agent** 友好"的卫生层,**不是**上表"Agent 指令 / system prompt"这一 harness 组件——后者已外置为 `reviewpilot/prompts/reviewer.md`。两者同名不同物,别混。
 
 ## 3. "名副其实"最小集 —— 完成情况
 
@@ -46,8 +48,8 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 |---|---|---|
 | ① | provider/model 配置化(去绑定、分阶段) | ✅ PR #13 |
 | ② | **受限只读 ReAct review loop + 工具集** | ✅ PR #40(取证 trace 露出 #41,证据校验 #42) |
-| 工程约定 | 根 `AGENTS.md`(agent 指令)+ CI 回归门(Back-Pressure) | ✅ 本轮 |
-| ③ 已排期 | 评审员系统提示从代码字符串抽成 `docs/REVIEWER_GUIDE.md`(可版本化/审计) | 📅 |
+| 工程约定 | 根 `AGENTS.md`(对开发 agent 友好,非 agent 指令组件)+ CI 回归门(Back-Pressure) | ✅ 本轮 |
+| ③ | 评审员系统提示外置为 `reviewpilot/prompts/reviewer.md`(可版本化/审计) | ✅ 本轮 |
 | ④ 已排期 | **run trace 持久化**(run_id + 各阶段模型/token/findings/护栏丢弃原因,JSONL→SQLite) | 📅 |
 | ⑤ 已排期 | 扩 eval:让 eval **走 review_loop** + 加"必须读仓库才能发现"的样本,证明 ReAct 价值 | 📅 |
 | ⑥ | 配置体系:每请求超时 / 重试 / 预算 / provider fallback | ⬜ |
@@ -55,8 +57,8 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 
 ## 5. 已知短板(诚实记录)
 
-- 已修:关联 issue 填充(PR #30/#34)、diffnorm rename/删除/binary 取名(#32)、护栏证据校验(#42)、根 `AGENTS.md` + CI 回归门(本轮)。
-- 仍在:结构化 run trace 未落盘(TUI 会话已落盘,但缺 run_id/token/各阶段模型/护栏丢弃原因);**eval 当前走 `analyze_chunked` 回退路径、尚未覆盖 ReAct review_loop**,且缺"必须读仓库才能发现"的样本;`chat` 追问仍只带 diff+历史,未接 Review Loop 的按需取证;评审员系统提示仍埋在代码字符串里(计划抽成 `docs/REVIEWER_GUIDE.md`)。
+- 已修:关联 issue 填充(PR #30/#34)、diffnorm rename/删除/binary 取名(#32)、护栏证据校验(#42)、根 `AGENTS.md` + CI 回归门、评审员系统提示外置为 `reviewpilot/prompts/reviewer.md`(本轮)。
+- 仍在:结构化 run trace 未落盘(TUI 会话已落盘,但缺 run_id/token/各阶段模型/护栏丢弃原因);**eval 当前走 `analyze_chunked` 回退路径、尚未覆盖 ReAct review_loop**,且缺"必须读仓库才能发现"的样本;`chat` 追问仍只带 diff+历史,未接 Review Loop 的按需取证。
 
 ## 6. 论证:为什么"领域 harness"这个定位立得住
 

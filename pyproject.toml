@@ -19,3 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["reviewpilot*"]
+
+[tool.setuptools.package-data]
+"reviewpilot.prompts" = ["*.md"]   # 评审员提示随包发布,供运行时加载
