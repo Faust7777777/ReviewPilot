@@ -221,8 +221,11 @@ def main(argv=None):
             _run_chat_ui(initial)
         elif args.cmd == "eval":
             from reviewpilot.evaluate import load_samples, evaluate
+            from reviewpilot.llm import chat_tools
             result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
-                              apply_guard=not args.no_guard)
+                              apply_guard=not args.no_guard,
+                              chat_tools=partial(chat_tools, stage="eval"),
+                              chat=partial(chat, stage="eval"))
             print(result.summary())
     except PRFetchError as exc:
         print(f"⚠️  {exc}")

@@ -63,3 +63,35 @@ class RepoWorkspace:
             ["git", "-c", "http.version=HTTP/1.1", "clone", "--depth", "1", "--quiet", url, tmp],
             check=True, capture_output=True, text=True)
         return cls(tmp)
+
+
+class DictWorkspace:
+    """内存工作区(给 eval / 测试用):文件来自 {path: text} 字典,无需真 clone。
+    实现与 RepoWorkspace 相同的 read_file / search / exists 接口,供 Review Loop 取证。"""
+
+    def __init__(self, files: dict[str, str]):
+        self.files = dict(files or {})
+
+    def exists(self, path: str) -> bool:
+        return path in self.files
+
+    def read_file(self, path: str, start: int = 1, end: int | None = None,
+                  max_lines: int = 150) -> str:
+        if path not in self.files:
+            return f"(找不到文件:{path})"
+        lines = self.files[path].splitlines()
+        start = max(1, int(start or 1))
+        end = int(end) if end else start + max_lines - 1
+        end = min(end, len(lines), start + max_lines - 1)
+        chunk = lines[start - 1:end]
+        body = "\n".join(f"{i}: {ln}" for i, ln in enumerate(chunk, start))
+        return f"{path} [{start}-{end} / 共{len(lines)}行]:\n{body}" if chunk else f"({path} 该范围为空)"
+
+    def search(self, query: str, max_results: int = 30) -> str:
+        q = (query or "").strip()
+        if not q:
+            return "(空查询)"
+        hits = [f"{path}:{i}:{ln}"
+                for path, text in self.files.items()
+                for i, ln in enumerate(text.splitlines(), 1) if q in ln]
+        return "\n".join(hits[:max_results]) if hits else "(无匹配)"

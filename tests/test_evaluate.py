@@ -64,3 +64,34 @@ def test_load_samples_roundtrip(tmp_path):
     p.write_text(json.dumps([{"name": "x", "title": "t", "diff": "d", "label": "clean"}]))
     samples = load_samples(str(p))
     assert samples[0].name == "x" and samples[0].label == "clean"
+
+
+def test_dict_workspace_read_search_exists():
+    from reviewpilot.workspace import DictWorkspace
+    ws = DictWorkspace({"a.py": "x = 1\nsend(y)\n"})
+    assert ws.exists("a.py") and not ws.exists("ghost.py")
+    assert "send(y)" in ws.read_file("a.py")
+    assert "(找不到文件" in ws.read_file("ghost.py")
+    assert "a.py:2:" in ws.search("send")      # 命中行带 path:line:
+    assert ws.search("nope") == "(无匹配)"
+
+
+def test_evaluate_sample_runs_review_loop_for_cross_file_sample():
+    # repo_files + chat_tools/chat → 走 Review Loop:读 caller 才能发现的跨文件问题(analyze_chunked 看不到)
+    s = Sample(
+        name="x", title="t", body="b", label="issue", expect_substring="tasks.py",
+        diff="--- a/notify.py\n+++ b/notify.py\n@@ -1 +1 @@\n-def send(msg):\n+def send(msg, channel):",
+        repo_files={"tasks.py": 'send("done")\n'},
+    )
+    seq = [
+        {"content": "", "calls": [{"id": "1", "name": "read_file", "args": {"path": "tasks.py"}}],
+         "assistant_msg": {"role": "assistant", "content": "",
+                           "tool_calls": [{"id": "1", "type": "function",
+                                           "function": {"name": "read_file", "arguments": "{}"}}]}},
+        {"content": "", "calls": [], "assistant_msg": {"role": "assistant", "content": ""}},
+    ]
+    chat_tools = lambda messages, tools: seq.pop(0)
+    chat = lambda messages: ('[{"kind":"risk","title":"调用方未更新","file":"tasks.py",'
+                             '"evidence":"tasks.py:1 stale send() call"}]')
+    res = evaluate_sample(s, llm=lambda p: "[]", apply_guard=True, chat_tools=chat_tools, chat=chat)
+    assert res.outcome == "TP"   # 读了 tasks.py 才发现、护栏 grounded 保留、命中 expect_substring

@@ -1,6 +1,8 @@
 """小样本 sanity eval:在带标注的样本上跑流水线,量误报率/漏报率。
 
 样本内联 diff(可复现,不依赖外部 PR),含 negative("clean")样本专测误报。
+跨文件样本可带 repo_files(内存仓库),走生产主路径 ReAct Review Loop 取证——
+用来检验"必须读仓库其它文件才能发现"的问题(diff 自包含样本测不出 loop 的价值)。
 不宣称"证明",只作 sanity 检查。
 """
 import json
@@ -26,6 +28,7 @@ class Sample(BaseModel):
     body: str = ""
     issue: str | None = None
     expect_substring: str | None = None  # issue 样本:命中文本应包含的提示词
+    repo_files: dict[str, str] | None = None  # 跨文件样本:提供"仓库其它文件"给 Review Loop 读取取证
 
 
 @dataclass
@@ -69,12 +72,23 @@ def _problem_findings(findings: list[Finding]) -> list[Finding]:
     return [f for f in findings if f.kind in _PROBLEM_KINDS]
 
 
-def evaluate_sample(s: Sample, llm, apply_guard: bool = True) -> SampleResult:
+def evaluate_sample(s: Sample, llm, apply_guard: bool = True,
+                    chat_tools=None, chat=None) -> SampleResult:
     t0 = time.perf_counter()
-    # 与生产 build_briefing_for 同款链路:analyze_chunked + 带 diff 的护栏(证据落盘校验)
-    findings = analyze_chunked(s.diff, s.title, s.body, s.issue, llm=llm)
+    if s.repo_files and chat_tools and chat:
+        # 跨文件样本:走生产主路径 ReAct Review Loop(按需读 repo_files 取证)
+        from reviewpilot.workspace import DictWorkspace
+        from reviewpilot.review_loop import run_review_loop, grounded_read_files
+        findings, trace = run_review_loop(s.diff, s.title, s.body, s.issue,
+                                          DictWorkspace(s.repo_files),
+                                          chat_tools=chat_tools, chat=chat)
+        read_files = grounded_read_files(trace)
+    else:
+        # 自包含样本:走回退路径 analyze_chunked(diff 即全部上下文)
+        findings = analyze_chunked(s.diff, s.title, s.body, s.issue, llm=llm)
+        read_files = None
     if apply_guard:
-        findings = apply_guardrail(findings, diff=s.diff)
+        findings = apply_guardrail(findings, diff=s.diff, read_files=read_files)
     latency = time.perf_counter() - t0
 
     problems = _problem_findings(findings)
@@ -92,8 +106,10 @@ def evaluate_sample(s: Sample, llm, apply_guard: bool = True) -> SampleResult:
     return SampleResult(s.name, s.label, outcome, len(problems), latency)
 
 
-def evaluate(samples: list[Sample], llm, apply_guard: bool = True) -> EvalResult:
-    results = [evaluate_sample(s, llm, apply_guard=apply_guard) for s in samples]
+def evaluate(samples: list[Sample], llm, apply_guard: bool = True,
+             chat_tools=None, chat=None) -> EvalResult:
+    results = [evaluate_sample(s, llm, apply_guard=apply_guard,
+                               chat_tools=chat_tools, chat=chat) for s in samples]
     n_clean = sum(s.label == "clean" for s in samples)
     n_issue = sum(s.label == "issue" for s in samples)
     fp = sum(r.outcome == "FP" for r in results)
