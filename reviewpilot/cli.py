@@ -1,4 +1,5 @@
 import argparse
+import time
 from functools import partial
 
 from reviewpilot.prfetch import fetch_pr, fetch_local, _default_runner, PRFetchError
@@ -18,9 +19,10 @@ _EVAL_LLM = partial(complete, stage="eval")
 
 
 def build_briefing_for(
-    pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None
+    pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None, run_log: bool = False
 ) -> Briefing:
     trace = None
+    _t0 = time.perf_counter()
     if workspace is not None:
         # 受限只读 Review Loop:模型按需 read_file/search 取证再出 finding(harness 主求解面)
         from reviewpilot.review_loop import run_review_loop
@@ -40,6 +42,7 @@ def build_briefing_for(
         findings = analyze_chunked(
             pr.diff, pr.title, pr.body, pr.issue, llm=llm, on_progress=on_progress
         )
+    latency_s = time.perf_counter() - _t0
     from reviewpilot.review_loop import grounded_read_files
 
     read_files = grounded_read_files(
@@ -52,6 +55,22 @@ def build_briefing_for(
     summary, inspected, limitations = build_inspection(
         pr.diff, findings, trace=trace, dropped=dropped
     )
+    if run_log:
+        from reviewpilot.llm import resolve_model
+        from reviewpilot.runlog import build_run_record, record_run
+
+        mode = "loop" if workspace is not None else "chunked"
+        record_run(
+            build_run_record(
+                pr.pr_ref,
+                mode,
+                resolve_model("analyze"),
+                findings,
+                dropped,
+                trace,
+                latency_s,
+            )
+        )
     return Briefing(
         pr_ref=pr.pr_ref,
         findings=findings,
@@ -166,7 +185,7 @@ def _analyze_to_session(pr, on_progress=None):
     """(briefing_text, session):分析 PR 出 briefing 并建会话。on_progress 透传给分析。"""
     ws = workspace_for(pr, on_progress=on_progress)
     briefing_text = render_briefing(
-        build_briefing_for(pr, on_progress=on_progress, workspace=ws)
+        build_briefing_for(pr, on_progress=on_progress, workspace=ws, run_log=True)
     )
     session = ChatSession(
         _CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text
@@ -281,7 +300,7 @@ def main(argv=None):
         if args.cmd == "review":
             pr = _pr_from_args(args)
             ws = workspace_for(pr)  # 取只读工作区 → 走 ReAct Review Loop(失败则回退)
-            print(render_briefing(build_briefing_for(pr, workspace=ws)))
+            print(render_briefing(build_briefing_for(pr, workspace=ws, run_log=True)))
         elif args.cmd == "chat":
             initial = None  # chat 可不带 PR:进 TUI 后再输入
             if args.diff_range:
