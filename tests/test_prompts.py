@@ -6,8 +6,18 @@ from reviewpilot.chat import ChatSession
 
 
 def test_loads_all_sections_nonempty():
-    for key in ("SYSTEM", "FINISH", "CHUNKED", "CHAT"):
+    for key in ("SYSTEM", "FINISH", "CHUNKED", "CHAT", "DISCOVERY"):
         assert load(key).strip(), f"section {key} 为空"
+
+
+def test_discovery_section_matches_resolve_system():
+    # 修复 2:resolve.py 的 _RESOLVE_SYSTEM 应从 reviewer.md 的 DISCOVERY 小节加载,
+    # 且文本与原硬编码一致(尾随空白忽略)。
+    from reviewpilot.resolve import _RESOLVE_SYSTEM
+
+    discovery = load("DISCOVERY")
+    assert discovery  # 非空
+    assert discovery.rstrip() == _RESOLVE_SYSTEM.rstrip()
 
 
 def test_system_and_finish_stay_single_line():
