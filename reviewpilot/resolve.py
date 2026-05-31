@@ -24,7 +24,14 @@ def interpret_target(text: str, llm=None) -> Target:
 
     if llm is None:
         return Target("unknown")
-    candidate = (llm(f"从用户输入中识别 GitHub 仓库,只返回 owner/repo 或 NONE。用户输入:{s}") or "").strip()
+    prompt = (
+        "用户想评审一个 GitHub 仓库,但输入可能不规范(用空格代替斜杠、大小写/拼写不准、"
+        "只给项目名)。请尽量解析成最可能的 owner/repo,例如:"
+        "'facebook react'->facebook/react;'fausttttttt yuyt'->fausttttttt/yuyt;"
+        "'react'->facebook/react。完全无法判断才返回 NONE。"
+        "只输出 owner/repo 或 NONE,不要任何解释或标点。\n用户输入:" + s
+    )
+    candidate = (llm(prompt) or "").strip().strip("`").strip()
     if not candidate or candidate.upper() == "NONE":
         return Target("unknown")
     try:
