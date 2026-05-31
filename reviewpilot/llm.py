@@ -43,3 +43,40 @@ def chat(messages: list[dict], model: str | None = None, stage: str | None = Non
 
 def complete(prompt: str, model: str | None = None, stage: str | None = None) -> str:
     return chat([{"role": "user", "content": prompt}], model=model, stage=stage)
+
+
+def chat_tools(messages: list[dict], tools: list[dict],
+               model: str | None = None, stage: str | None = None) -> dict:
+    """带工具(function-calling)的一步对话。返回 {content, calls, assistant_msg}:
+    - calls: [{id, name, args(dict)}] 模型本步要调的工具(已解析参数)
+    - assistant_msg: 供把本步回填进 messages 继续多轮(含 API 格式的 tool_calls)
+    与 litellm 细节解耦,便于注入测试。"""
+    import json
+    import warnings
+    import litellm
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        resp = litellm.completion(
+            model=resolve_model(stage, model),
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0,
+        )
+    msg = resp.choices[0].message
+    raw_calls = msg.tool_calls or []
+    calls = []
+    for tc in raw_calls:
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        calls.append({"id": tc.id, "name": tc.function.name, "args": args})
+    assistant_msg = {"role": "assistant", "content": msg.content or ""}
+    if raw_calls:
+        assistant_msg["tool_calls"] = [
+            {"id": tc.id, "type": "function",
+             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            for tc in raw_calls
+        ]
+    return {"content": msg.content or "", "calls": calls, "assistant_msg": assistant_msg}
