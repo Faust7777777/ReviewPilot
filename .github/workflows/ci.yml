@@ -1,0 +1,23 @@
+name: CI
+
+# Back-Pressure / Sensors 层:每次 push 与 PR 自动跑测试套件,
+# 让 reviewpilot 自己的回归门(pytest)真正接进合并回路,而不只是本地手动跑。
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # 硬约束:3.13 装不上 numpy 老轮子
+      - name: Install (含 dev 依赖)
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest -q
+        # 注:eval(reviewpilot eval)需要 LLM key 且会产生费用,不在 CI 跑;
+        # 改动 analyzer/guardrail/review_loop 后请按 AGENTS.md 本地手动跑 eval。
