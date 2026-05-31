@@ -8,9 +8,10 @@
 ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific PR Review Harness)**,
 而**不是**通用 agent harness(如 Aider / OpenCode / Goose / OpenHands)。
 
-更精确的现状限定词:**linear PR review harness / proto-harness**——它把 PR 评审拆成
-**可替换、可度量、可对照**的阶段(获取 → 上下文 → 模型分析 → 证据护栏 → 渲染 → 回归评测),
-但还不具备通用 harness 的"agent 自由操作仓库"那一面。
+它把 PR 评审拆成**可替换、可度量、可对照**的阶段(获取 → 上下文 → 模型分析 → 证据护栏 → 渲染 → 回归评测);
+**且已具备 harness 的核心求解面:受限只读 ReAct 评审循环**——评审时模型按需 `read_file`/`search`
+仓库取证(只读、限步数、全程 trace),基于"diff + 读到的证据"出 finding(PR #40)。
+它仍**不是**让 agent 自由改仓库的通用 coding agent——刻意约束在"只读取证 + 诚实评审"。
 
 > 对外一句话:**ReviewPilot 是一个领域专用 PR 评审 harness——把 PR review 拆成可观测的阶段,
 > 约束模型只基于证据输出少量高置信结论,并用小样本 eval 比较不同模型、上下文与护栏策略。
@@ -18,39 +19,39 @@ ReviewPilot 当前是一个 **领域专用的 PR 评审 harness(domain-specific 
 
 ## 2. Harness 要素对照(独立评审打分)
 
-| 要素 | ReviewPilot | 说明 / 与 Aider·OpenCode·Goose·PR-Agent 的差距 |
+| 要素 | ReviewPilot | 说明 |
 |---|---|---|
-| Agent loop | ❌ 无 | 固定线性流水线,非循环决策 |
-| Tool / function calling | ❌ 无 | 仅程序侧 `gh`,模型不能调用工具 |
-| 上下文 / 会话管理 | 🟡 部分 | `chat` 有 diff+消息历史,无仓库级检索/摘要 |
-| Provider / model 抽象 | ✅ 有(已补) | litellm + 按前缀选原生 key + 分阶段模型(PR #13) |
-| 权限 / 沙箱 | ❌ 无 | 无只读工具权限模型 / step cap |
-| 配置体系 | 🟡 部分 | 已有分阶段模型;缺 profile / 预算 / 超时 / 重试 |
-| 可观测 / trace | ❌ 无 | eval 记 latency,无 run trace |
-| Eval / 回归 | ✅ 有(亮点) | 小样本 FP/FN + 护栏开关对照;样本仍小 |
+| Agent loop | ✅ 有(PR #40) | 受限只读 ReAct 评审循环:推理→调工具取证→观察→再判断→停 |
+| Tool / function calling | ✅ 有(PR #40) | litellm function-calling;只读工具 `read_file` / `search`(`llm.chat_tools`) |
+| 上下文 / 会话管理 | ✅ 有 | 评审时按需读仓库(workspace,本地目录/浅 clone);`chat` 多轮历史 |
+| Provider / model 抽象 | ✅ 有 | litellm + 按前缀选原生 key + 分阶段模型(PR #13) |
+| 权限 / 沙箱 | 🟡 部分 | 工具全只读 + 路径穿越防护 + step cap;未做进程级沙箱 |
+| 配置体系 | 🟡 部分 | 分阶段模型;缺 profile / 预算 / 超时 |
+| 可观测 / trace | 🟡 部分 | Loop 取证 trace 已露出在 briefing(PR #41);未做持久化 run_id |
+| Eval / 回归 | ✅ 有(亮点) | 小样本 FP/FN + 护栏开关对照;与生产同链路(PR #33) |
 
-## 3. "名副其实"还差什么(最小集)
+## 3. "名副其实"最小集 —— 完成情况
 
-1. 仓库级**只读上下文工具**:`read_file` / `search` / `list_changed_files` / `get_hunk` / RepoMap。
-2. 受限 **review loop**:模型可请求上下文,最多 N 步,工具全只读,全程 trace。
-3. **evidence validator**:校验 finding 的 file/line/evidence 确实来自 diff 或读到的上下文(当前护栏只查"非空")。
-4. **run trace**:`run_id` + 每阶段 prompt/模型/latency/token/raw/findings/护栏丢弃原因。
-5. 生产与 eval **共用同一 pipeline**,保存 raw trace 供回归。
+1. ✅ 仓库级**只读上下文工具**:`read_file` / `search`(`workspace.py`,PR #40)。
+2. ✅ 受限 **review loop**:模型按需取证,≤N 步,只读,全程 trace(`review_loop.py`,PR #40)。
+3. ✅ **evidence validator**:finding 的 file 必须落在 diff 改动文件 ∪ 读过的文件,否则当幻觉丢弃(`guardrail`,本轮)。
+4. 🟡 **run trace**:Loop trace 已展示;持久化 run_id/token 待做。
+5. ✅ 生产与 eval **共用同一 pipeline**(PR #33)。
 
-## 4. 进化路线图(按性价比;独立评审排序)
+## 4. 进化路线图
 
 | 优先级 | 方向 | 状态 |
 |---|---|---|
-| ① | **provider/model 配置化**:去 DeepSeek 绑定、分阶段模型、fallback | ✅ 已做(PR #13,fallback 待补) |
-| ② | **确定性检索 → 受限只读 tool loop**:先按 PR 改动自动读同文件/调用方/测试 + RepoMap;再上"模型按需取上下文"的只读工具循环(禁 shell/写盘,≤5–8 步) | ⬜ 下一步 |
-| ③ | **run trace**(JSONL→SQLite):没有 trace 就难证明"harness 可度量" | ⬜ |
-| ④ | **扩 eval**:期望升级到 kind/file/evidence/关键词;生产与 eval 同入口;加真实 PR / repo fixture / 上下文依赖样本 | ⬜ |
-| ⑤ | **跨 PR 记忆**:团队规则、历史误报、常改模块、已接受/驳回结论;必须作为可检索证据注入,不做不可审计的长期 prompt 记忆 | ⬜ |
+| ① | provider/model 配置化(去绑定、分阶段) | ✅ PR #13 |
+| ② | **受限只读 ReAct review loop + 工具集** | ✅ PR #40(取证 trace 露出 #41,证据校验本轮) |
+| ③ | **run trace 持久化**(run_id + prompt/模型/token/findings/护栏丢弃原因,JSONL→SQLite) | 🟡 trace 已露出,持久化待做 |
+| ④ | 扩 eval:加"必须读仓库才能发现"的上下文依赖样本,证明 ReAct 的价值 | ⬜ |
+| ⑤ | 跨 PR 记忆:团队规则/历史误报/已驳回结论,作为可检索证据注入 | ⬜ |
 
-## 5. 已知短板(诚实记录,供后续修)
+## 5. 已知短板(诚实记录)
 
-- `prfetch` 定义了 `issue` 字段但未填充关联 issue;`diffnorm` 轻量,漏 rename/删除/binary;护栏只查证据非空、不验证证据真在 diff 中。
-- `chat` 是"带历史的 diff 问答",非真正的 repo session(无摘要/无 token 预算/无工具)。
+- 已修:关联 issue 填充(PR #30/#34)、diffnorm rename/删除/binary 取名(#32)、护栏证据校验(本轮)。
+- 仍在:run trace 未持久化;`chat` 追问目前仍只带 diff+历史,未接 Review Loop 的按需取证;eval 样本偏小、尚缺"必须读仓库才能发现"的样本。
 
 ## 6. 论证:为什么"领域 harness"这个定位立得住
 
