@@ -15,6 +15,9 @@ class _FakeWS:
         self.searches.append(query)
         return f"命中: {query}"
 
+    def exists(self, path):
+        return True   # fake:读到的文件都当作真实存在
+
 
 def _tool_call(cid, name, args_json="{}"):
     return {"id": cid, "type": "function",
@@ -57,3 +60,13 @@ def test_loop_stops_at_max_steps():
     chat = lambda messages: "[]"
     _findings, trace = run_review_loop("d", "t", "b", None, ws, chat_tools, chat, max_steps=3)
     assert len(trace) == 3   # 限步数:最多 3 步
+
+
+def test_grounded_read_files_excludes_failed_reads_and_includes_search_hits():
+    from reviewpilot.review_loop import grounded_read_files
+    trace = [
+        {"tool": "read_file", "args": {"path": "real.py"}, "ok": True},
+        {"tool": "read_file", "args": {"path": "ghost.py"}, "ok": False},  # 幻觉路径,不算 grounded
+        {"tool": "search", "args": {"query": "x"}, "hits": ["found.py"]},
+    ]
+    assert grounded_read_files(trace) == ["real.py", "found.py"]

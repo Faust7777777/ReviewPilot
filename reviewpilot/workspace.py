@@ -19,6 +19,11 @@ class RepoWorkspace:
             return None
         return p
 
+    def exists(self, path: str) -> bool:
+        """该路径是否为仓库内真实文件(grounding 用:区分"真读到"与"幻觉路径")。"""
+        p = self._safe(path)
+        return bool(p and p.is_file())
+
     def read_file(self, path: str, start: int = 1, end: int | None = None,
                   max_lines: int = 150) -> str:
         p = self._safe(path)

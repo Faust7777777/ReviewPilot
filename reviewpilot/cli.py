@@ -31,9 +31,11 @@ def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None) -
     else:
         findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
                                    on_progress=on_progress)
-    read_files = [t["args"].get("path", "") for t in (trace or []) if t.get("tool") == "read_file"]
-    findings = apply_guardrail(findings, diff=pr.diff, read_files=read_files)
-    summary, inspected, limitations = build_inspection(pr.diff, findings, trace=trace)
+    from reviewpilot.review_loop import grounded_read_files
+    read_files = grounded_read_files(trace)   # 仅真读到的文件+搜索命中,失败读取不算(防幻觉)
+    dropped: list[dict] = []
+    findings = apply_guardrail(findings, diff=pr.diff, read_files=read_files, dropped=dropped)
+    summary, inspected, limitations = build_inspection(pr.diff, findings, trace=trace, dropped=dropped)
     return Briefing(pr_ref=pr.pr_ref, findings=findings,
                     summary=summary, inspected=inspected, limitations=limitations)
 
