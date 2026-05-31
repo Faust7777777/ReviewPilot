@@ -2,6 +2,7 @@
 
 来源:本地仓库目录,或浅 clone 的临时目录。所有操作只读 + 路径穿越防护。
 """
+
 import subprocess
 import tempfile
 from pathlib import Path
@@ -14,7 +15,7 @@ class RepoWorkspace:
     def _safe(self, path: str) -> Path | None:
         p = (self.root / (path or "")).resolve()
         try:
-            p.relative_to(self.root)        # 防路径穿越(../ 逃出仓库)
+            p.relative_to(self.root)  # 防路径穿越(../ 逃出仓库)
         except ValueError:
             return None
         return p
@@ -24,8 +25,9 @@ class RepoWorkspace:
         p = self._safe(path)
         return bool(p and p.is_file())
 
-    def read_file(self, path: str, start: int = 1, end: int | None = None,
-                  max_lines: int = 150) -> str:
+    def read_file(
+        self, path: str, start: int = 1, end: int | None = None, max_lines: int = 150
+    ) -> str:
         p = self._safe(path)
         if p is None or not p.is_file():
             return f"(找不到文件:{path})"
@@ -36,9 +38,13 @@ class RepoWorkspace:
         start = max(1, int(start or 1))
         end = int(end) if end else start + max_lines - 1
         end = min(end, len(lines), start + max_lines - 1)
-        chunk = lines[start - 1:end]
+        chunk = lines[start - 1 : end]
         body = "\n".join(f"{i}: {ln}" for i, ln in enumerate(chunk, start))
-        return f"{path} [{start}-{end} / 共{len(lines)}行]:\n{body}" if chunk else f"({path} 该范围为空)"
+        return (
+            f"{path} [{start}-{end} / 共{len(lines)}行]:\n{body}"
+            if chunk
+            else f"({path} 该范围为空)"
+        )
 
     def search(self, query: str, max_results: int = 30) -> str:
         if not (query or "").strip():
@@ -46,11 +52,18 @@ class RepoWorkspace:
         try:
             out = subprocess.run(
                 ["rg", "-n", "--no-heading", "-S", "--", query, "."],
-                cwd=self.root, capture_output=True, text=True, timeout=20).stdout
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            ).stdout
         except FileNotFoundError:
             out = subprocess.run(
                 ["grep", "-rn", "--", query, "."],
-                cwd=self.root, capture_output=True, text=True).stdout
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+            ).stdout
         hits = [ln.lstrip("./") for ln in out.splitlines()][:max_results]
         return "\n".join(hits) if hits else "(无匹配)"
 
@@ -60,8 +73,21 @@ class RepoWorkspace:
         tmp = tempfile.mkdtemp(prefix="rp_ws_")
         url = repo if repo.startswith("http") else f"https://github.com/{repo}"
         subprocess.run(
-            ["git", "-c", "http.version=HTTP/1.1", "clone", "--depth", "1", "--quiet", url, tmp],
-            check=True, capture_output=True, text=True)
+            [
+                "git",
+                "-c",
+                "http.version=HTTP/1.1",
+                "clone",
+                "--depth",
+                "1",
+                "--quiet",
+                url,
+                tmp,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         return cls(tmp)
 
 
@@ -75,23 +101,66 @@ class DictWorkspace:
     def exists(self, path: str) -> bool:
         return path in self.files
 
-    def read_file(self, path: str, start: int = 1, end: int | None = None,
-                  max_lines: int = 150) -> str:
+    def read_file(
+        self, path: str, start: int = 1, end: int | None = None, max_lines: int = 150
+    ) -> str:
         if path not in self.files:
             return f"(找不到文件:{path})"
         lines = self.files[path].splitlines()
         start = max(1, int(start or 1))
         end = int(end) if end else start + max_lines - 1
         end = min(end, len(lines), start + max_lines - 1)
-        chunk = lines[start - 1:end]
+        chunk = lines[start - 1 : end]
         body = "\n".join(f"{i}: {ln}" for i, ln in enumerate(chunk, start))
-        return f"{path} [{start}-{end} / 共{len(lines)}行]:\n{body}" if chunk else f"({path} 该范围为空)"
+        return (
+            f"{path} [{start}-{end} / 共{len(lines)}行]:\n{body}"
+            if chunk
+            else f"({path} 该范围为空)"
+        )
 
     def search(self, query: str, max_results: int = 30) -> str:
         q = (query or "").strip()
         if not q:
             return "(空查询)"
-        hits = [f"{path}:{i}:{ln}"
-                for path, text in self.files.items()
-                for i, ln in enumerate(text.splitlines(), 1) if q in ln]
+        hits = [
+            f"{path}:{i}:{ln}"
+            for path, text in self.files.items()
+            for i, ln in enumerate(text.splitlines(), 1)
+            if q in ln
+        ]
         return "\n".join(hits[:max_results]) if hits else "(无匹配)"
+
+    def file_type(self, path: str) -> str:
+        return f"(DictWorkspace 无法检测文件类型:{path})"
+
+    def hex_preview(self, path: str, max_bytes: int = 256) -> str:
+        return f"(DictWorkspace 无法 hex 预览:{path})"
+
+    def file_type(self, path: str) -> str:
+        """检测文件类型(file 命令),用于识别二进制/压缩/可执行文件。"""
+        p = self._safe(path)
+        if p is None or not p.is_file():
+            return f"(找不到文件:{path})"
+        try:
+            out = subprocess.run(
+                ["file", "-b", str(p)], capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+            return out
+        except Exception as exc:
+            return f"(file 失败:{exc})"
+
+    def hex_preview(self, path: str, max_bytes: int = 256) -> str:
+        """文件前 N 字节 hex dump(xxd),用于快速审视二进制文件内容。"""
+        p = self._safe(path)
+        if p is None or not p.is_file():
+            return f"(找不到文件:{path})"
+        try:
+            out = subprocess.run(
+                ["xxd", "-l", str(min(max_bytes, 4096)), str(p)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+            return out or "(xxd 无输出)"
+        except Exception as exc:
+            return f"(xxd 失败:{exc})"

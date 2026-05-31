@@ -267,6 +267,34 @@ def fetch_repo_latest(repo: str, runner=_default_runner) -> PRData:
     )
 
 
+def fetch_commit(repo: str, sha: str, runner=_default_runner) -> PRData:
+    """拉指定 commit 的 diff(用于评审历史提交,如 xz 后门 commit)。"""
+    try:
+        detail = json.loads(runner(["gh", "api", f"repos/{repo}/commits/{sha}"]))
+    except subprocess.CalledProcessError as exc:
+        raise PRFetchError(
+            _classify_gh_error(getattr(exc, "stderr", "") or "")
+        ) from exc
+    message = (detail.get("commit") or {}).get("message", "")
+    title = message.splitlines()[0] if message else ""
+    blocks = []
+    for item in detail.get("files", []):
+        patch = item.get("patch")
+        filename = item.get("filename", "")
+        if not patch or not filename:
+            continue
+        blocks.append(
+            f"diff --git a/{filename} b/{filename}\n"
+            f"--- a/{filename}\n+++ b/{filename}\n{patch}"
+        )
+    return PRData(
+        pr_ref=f"{repo}@{sha[:7]}",
+        title=title,
+        body=message,
+        diff="\n".join(blocks),
+    )
+
+
 def fetch_local(
     staged: bool = False,
     diff_range: str | None = None,

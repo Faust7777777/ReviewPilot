@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import re
 import shlex
 from functools import partial
 
@@ -50,6 +51,7 @@ class ReviewPilotApp(App):
         self._persistence_disabled = False
         self._busy = False
         self.transcript: list[str] = []  # 渲染过的消息文本(便于测试/检索)
+        self._current_repo: str = ""  # 当前浏览/评审的仓库,供 commit hash 上下文
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -135,9 +137,13 @@ class ReviewPilotApp(App):
     def _commands(self):
         return {
             "/help": ("列出所有命令及一句话说明。", self._cmd_help),
-            "/model": ("显示/切换 analyze/chat 模型。", self._cmd_model),
+            "/model": (
+                "切换 deepseek 模型(flash/pro)或显示当前模型。",
+                self._cmd_model,
+            ),
             "/key": ("显示/设置 API key(按 provider 存进环境变量)。", self._cmd_key),
             "/auth": ("检查 gh 登录状态并引导认证。", self._cmd_auth),
+            "/setup": ("引导式初始配置(key→auth→模型)。", self._cmd_setup),
             "/clear": ("清空对话区,保留当前会话。", self._cmd_clear),
             "/reset": ("清空当前会话与 PR,重新等待输入。", self._cmd_reset),
             "/files": ("列出当前 PR 改动文件。", self._cmd_files),
@@ -175,26 +181,43 @@ class ReviewPilotApp(App):
         await self._say("\n".join(lines))
 
     async def _cmd_model(self, args: list[str]) -> None:
+        aliases = {
+            "flash": "deepseek/deepseek-v4-flash",
+            "pro": "deepseek/deepseek-v4-pro",
+        }
+
+        def _short(name: str) -> str:
+            for alias, full in aliases.items():
+                if name.endswith(full.split("/")[-1]):
+                    return alias
+            return name
+
         if not args:
+            a = _short(resolve_model("analyze"))
+            c = _short(resolve_model("chat"))
             await self._say(
-                f"analyze: `{resolve_model('analyze')}`\n\n"
-                f"chat: `{resolve_model('chat')}`"
+                f"analyze: `{resolve_model('analyze')}` ({a})\n"
+                f"chat: `{resolve_model('chat')}` ({c})\n\n"
+                "切换:`/model flash` `/model pro` (默认同时切 analyze+chat)\n"
+                "单独:`/model flash analyze` `/model pro chat`"
             )
             return
-        if len(args) != 2 or args[0] not in {"chat", "analyze"}:
-            await self._say(
-                "用法:`/model` 或 `/model chat <model>` / `/model analyze <model>`"
-            )
+
+        choice = args[0].lower()
+        if choice not in aliases:
+            await self._say(f"未知模型:{choice}。可选:flash / pro")
             return
-        stage, model = args
-        env_name = f"RP_MODEL_{stage.upper()}"
-        os.environ[env_name] = model
-        note = (
-            "analyze 切换不会自动重跑当前 briefing。"
-            if stage == "analyze"
-            else "后续追问将使用新 chat 模型。"
-        )
-        await self._say(f"已切换 {stage} 模型为 `{model}`。\n\n{note}")
+
+        full = aliases[choice]
+        stages = ["analyze", "chat"] if len(args) < 2 else [args[1]]
+        valid = {"analyze", "chat"}
+        if any(s not in valid for s in stages):
+            await self._say("stage 应为 analyze 或 chat")
+            return
+        for s in stages:
+            os.environ[f"RP_MODEL_{s.upper()}"] = full
+        detail = " + ".join(stages)
+        await self._say(f"已切换 {detail} → `{full}` ({choice})")
 
     async def _cmd_clear(self, args: list[str]) -> None:
         log = self.query_one("#log", VerticalScroll)
@@ -353,6 +376,44 @@ class ReviewPilotApp(App):
         except Exception:
             await self._say("未检测到 gh CLI。安装:https://cli.github.com")
 
+    async def _cmd_setup(self, args: list[str]) -> None:
+        steps = []
+        if not any(
+            os.environ.get(k)
+            for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+        ):
+            steps.append(("1️⃣  API key", "`/key deepseek sk-xxx` (或 openai/anthropic)"))
+        import subprocess
+
+        try:
+            if (
+                subprocess.run(
+                    ["gh", "auth", "status"], capture_output=True, timeout=5
+                ).returncode
+                != 0
+            ):
+                steps.append(
+                    (
+                        "2️⃣  GitHub 登录",
+                        "在终端运行 `gh auth login`,或直接在 TUI 里贴 PR 链接",
+                    )
+                )
+        except Exception:
+            steps.append(
+                ("2️⃣  GitHub CLI", "安装 gh:https://cli.github.com → `gh auth login`")
+            )
+        steps.append(
+            (
+                "3️⃣  模型",
+                f"analyze:`{resolve_model('analyze')}`  chat:`{resolve_model('chat')}`  `/model` 切换",
+            )
+        )
+        await self._say(
+            "⚙️  快速配置:\n\n"
+            + "\n".join(f"{n} — {h}" for n, h in steps)
+            + "\n\n配好后贴 PR 链接或 local 开始评审。`/help` 看全部命令。"
+        )
+
     async def _cmd_resume(self, args: list[str]) -> None:
         if not args:
             rows = list_sessions()
@@ -418,7 +479,6 @@ class ReviewPilotApp(App):
 
     @work(exclusive=True)
     async def _resolve(self, text: str) -> None:
-        """解析输入意图:pr/local 直接分析;repo 列 PR 选;模糊则 y/n 确认。"""
         self._set_busy(True, "识别中…")
         try:
             target = await asyncio.to_thread(self._services.interpret, text)
@@ -435,6 +495,9 @@ class ReviewPilotApp(App):
         elif target.kind == "repo":
             await self._enter_repo(target.value)
         elif target.kind == "fuzzy":
+            if self._is_commitish(text) and self._current_repo:
+                await self._fetch_commit(self._current_repo, text)
+                return
             await self._resolve_react(target.value or text)
         else:  # unknown
             await self._say(
@@ -468,6 +531,7 @@ class ReviewPilotApp(App):
         self._set_busy(False, "y 确认 / n 否 / 追问")
 
     async def _enter_repo(self, repo: str) -> None:
+        self._current_repo = repo
         await self._think(f"列出 {repo} 的 open PR…")
         try:
             prs = await asyncio.to_thread(self._services.list_prs, repo)
@@ -488,9 +552,24 @@ class ReviewPilotApp(App):
         await self._say(
             f"`{repo}` 的 open PR:\n\n"
             + "\n".join(lines)
-            + "\n\n输入编号选择,或直接贴别的链接。"
+            + "\n\n输入编号选择,或贴 commit hash / 别的链接。"
         )
         self._set_busy(False, "输入编号选择 PR")
+
+    @staticmethod
+    def _is_commitish(text: str) -> bool:
+        return bool(re.fullmatch(r"[0-9a-fA-F]{7,40}", text))
+
+    async def _fetch_commit(self, repo: str, sha: str) -> None:
+        await self._think(f"获取 {repo}@{sha[:8]} 的 diff…")
+        url = f"https://github.com/{repo}/commit/{sha}.diff"
+        try:
+            data = await asyncio.to_thread(self._services.pr_data, url)
+        except Exception as exc:
+            await self._say(f"获取 commit 失败:{exc}")
+            self._set_busy(False, "贴 PR / repo 链接,或 local")
+            return
+        await self._fetch_and_analyze(lambda: data)
 
     async def _fetch_and_analyze(self, fetch_callable) -> None:
         self._set_busy(True, "分析中…")
@@ -603,13 +682,16 @@ class ReviewPilotApp(App):
                 chosen = prs[n - 1]
             else:
                 chosen = next((p for p in prs if p["number"] == n), None)
-        if chosen is None:
-            self._pending = pending
-            await self._say("无效编号,请重新输入,或直接贴链接。")
-            self._set_busy(False, "输入编号选择 PR")
+        if chosen is not None:
+            url = f"https://github.com/{repo}/pull/{chosen['number']}"
+            await self._fetch_and_analyze(lambda: self._services.pr_data(url))
             return
-        url = f"https://github.com/{repo}/pull/{chosen['number']}"
-        await self._fetch_and_analyze(lambda: self._services.pr_data(url))
+        if re.fullmatch(r"[0-9a-fA-F]{7,40}", sel):
+            await self._fetch_commit(repo, sel)
+            return
+        self._pending = pending
+        await self._say("无效编号,请重新输入,或直接贴 commit hash / 别的链接。")
+        self._set_busy(False, "输入编号选择 PR")
 
     @work
     async def _answer(self, question: str) -> None:

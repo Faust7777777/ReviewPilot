@@ -219,6 +219,13 @@ class _ChatServices:
         return _resolve_with_tools(text, tools, partial(chat_tools, stage="analyze"))
 
     def pr_data(self, ref):
+        import re
+
+        m = re.search(r"github\.com/([^/]+/[^/]+)/commit/([0-9a-fA-F]+)", ref)
+        if m:
+            from reviewpilot.prfetch import fetch_commit
+
+            return fetch_commit(m.group(1), m.group(2))
         return fetch_pr(ref)
 
     def local_data(self, text):
