@@ -7,6 +7,30 @@ from reviewpilot.analyzer import parse_findings
 from reviewpilot.models import Finding
 from reviewpilot.prompts import load as load_prompt
 
+
+def _hit_files(search_output: str) -> list[str]:
+    """从 rg/grep 的 `path:line:content` 输出里抽出命中的文件路径(供 grounding)。"""
+    files = []
+    for ln in (search_output or "").splitlines():
+        parts = ln.split(":", 2)
+        if len(parts) >= 3 and parts[1].strip().isdigit() and parts[0].strip():
+            files.append(parts[0].strip())
+    return list(dict.fromkeys(files))
+
+
+def grounded_read_files(trace) -> list[str]:
+    """从 trace 提取"可作 grounding 的文件":成功读到的文件 + 搜索命中的文件。
+    读失败(幻觉路径返回 not-found)的**不算**——这是护栏防幻觉的关键。"""
+    files = []
+    for t in (trace or []):
+        if t.get("tool") == "read_file" and t.get("ok"):
+            p = (t.get("args") or {}).get("path", "")
+            if p:
+                files.append(p)
+        elif t.get("tool") == "search":
+            files.extend(t.get("hits", []))
+    return list(dict.fromkeys(files))
+
 _TOOLS = [
     {"type": "function", "function": {
         "name": "read_file",
@@ -49,13 +73,15 @@ def run_review_loop(diff, title, body, issue, workspace, chat_tools, chat,
         for c in calls:
             a = c["args"]
             if c["name"] == "read_file":
-                res = workspace.read_file(a.get("path", ""), a.get("start", 1), a.get("end"))
-                trace.append({"tool": "read_file", "args": a})
+                path = a.get("path", "")
+                res = workspace.read_file(path, a.get("start", 1), a.get("end"))
+                # 仅"真实存在的文件"算 grounding:防"幻觉路径→读到 not-found→当证据"绕过护栏
+                trace.append({"tool": "read_file", "args": a, "ok": workspace.exists(path)})
                 if on_progress:
-                    on_progress(f"读取 {a.get('path', '')}")
+                    on_progress(f"读取 {path}")
             elif c["name"] == "search":
                 res = workspace.search(a.get("query", ""))
-                trace.append({"tool": "search", "args": a})
+                trace.append({"tool": "search", "args": a, "hits": _hit_files(res)})
                 if on_progress:
                     on_progress(f"搜索 “{a.get('query', '')}”")
             else:
