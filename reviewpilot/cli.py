@@ -6,7 +6,7 @@ from reviewpilot.analyzer import analyze_chunked
 from reviewpilot.guardrail import apply_guardrail
 from reviewpilot.briefing import render_briefing
 from reviewpilot.models import Briefing
-from reviewpilot.llm import complete, chat
+from reviewpilot.llm import complete, chat, chat_tools
 from reviewpilot.chat import ChatSession
 from reviewpilot.inspection import build_inspection
 from reviewpilot.tui import make_tui_input
@@ -17,32 +17,54 @@ _CHAT_LLM = partial(chat, stage="chat")
 _EVAL_LLM = partial(complete, stage="eval")
 
 
-def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None) -> Briefing:
+def build_briefing_for(
+    pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None
+) -> Briefing:
     trace = None
     if workspace is not None:
         # 受限只读 Review Loop:模型按需 read_file/search 取证再出 finding(harness 主求解面)
         from reviewpilot.review_loop import run_review_loop
         from reviewpilot.llm import chat_tools
+
         findings, trace = run_review_loop(
-            pr.diff, pr.title, pr.body, pr.issue, workspace,
+            pr.diff,
+            pr.title,
+            pr.body,
+            pr.issue,
+            workspace,
             chat_tools=partial(chat_tools, stage="analyze"),
             chat=partial(chat, stage="analyze"),
-            on_progress=on_progress)
+            on_progress=on_progress,
+        )
     else:
-        findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
-                                   on_progress=on_progress)
+        findings = analyze_chunked(
+            pr.diff, pr.title, pr.body, pr.issue, llm=llm, on_progress=on_progress
+        )
     from reviewpilot.review_loop import grounded_read_files
-    read_files = grounded_read_files(trace)   # 仅真读到的文件+搜索命中,失败读取不算(防幻觉)
+
+    read_files = grounded_read_files(
+        trace
+    )  # 仅真读到的文件+搜索命中,失败读取不算(防幻觉)
     dropped: list[dict] = []
-    findings = apply_guardrail(findings, diff=pr.diff, read_files=read_files, dropped=dropped)
-    summary, inspected, limitations = build_inspection(pr.diff, findings, trace=trace, dropped=dropped)
-    return Briefing(pr_ref=pr.pr_ref, findings=findings,
-                    summary=summary, inspected=inspected, limitations=limitations)
+    findings = apply_guardrail(
+        findings, diff=pr.diff, read_files=read_files, dropped=dropped
+    )
+    summary, inspected, limitations = build_inspection(
+        pr.diff, findings, trace=trace, dropped=dropped
+    )
+    return Briefing(
+        pr_ref=pr.pr_ref,
+        findings=findings,
+        summary=summary,
+        inspected=inspected,
+        limitations=limitations,
+    )
 
 
 def workspace_for(pr, on_progress=None):
     """为评审取得只读工作区:local 用当前目录;PR/repo 浅 clone。失败返回 None(回退 analyze_chunked)。"""
     from reviewpilot.workspace import RepoWorkspace
+
     ref = pr.pr_ref or ""
     try:
         if ref.startswith("local"):
@@ -73,17 +95,24 @@ def resolve_pr_text(text: str):
     if low == "local":
         return fetch_local()
     if low.startswith("local"):
-        rest = text[len("local"):].strip()
+        rest = text[len("local") :].strip()
         if rest in ("--staged", "staged"):
             return fetch_local(staged=True)
         if rest.startswith("--range"):
-            rest = rest[len("--range"):].strip()
+            rest = rest[len("--range") :].strip()
         return fetch_local(diff_range=rest) if rest else fetch_local()
     return fetch_pr(text)
 
 
-def run_chat(url: str = None, chat_llm=_CHAT_LLM, analyze_llm=_ANALYZE_LLM,
-             runner=_default_runner, input_fn=input, output_fn=print, pr=None) -> None:
+def run_chat(
+    url: str = None,
+    chat_llm=_CHAT_LLM,
+    analyze_llm=_ANALYZE_LLM,
+    runner=_default_runner,
+    input_fn=input,
+    output_fn=print,
+    pr=None,
+) -> None:
     """先出 briefing,再进入多轮追问。input_fn/output_fn 可注入便于测试。
     pr 可直接传入(如本地模式),否则按 url 经 gh 获取。"""
     if pr is None:
@@ -106,9 +135,13 @@ def run_chat(url: str = None, chat_llm=_CHAT_LLM, analyze_llm=_ANALYZE_LLM,
 
 def _add_pr_source_args(p):
     p.add_argument("pr_url", nargs="?", help="GitHub PR 链接;本地模式可省略")
-    p.add_argument("--local", action="store_true", help="本地模式:读 git diff,不依赖 GitHub")
+    p.add_argument(
+        "--local", action="store_true", help="本地模式:读 git diff,不依赖 GitHub"
+    )
     p.add_argument("--staged", action="store_true", help="本地模式:仅暂存区改动")
-    p.add_argument("--range", dest="diff_range", help="本地模式:diff 范围,如 main...HEAD")
+    p.add_argument(
+        "--range", dest="diff_range", help="本地模式:diff 范围,如 main...HEAD"
+    )
     p.add_argument("--title", help="本地模式:作为'作者声称'的标题")
     p.add_argument("--body", help="本地模式:作为'作者声称'的描述")
 
@@ -116,18 +149,28 @@ def _add_pr_source_args(p):
 def _pr_from_args(args):
     """按 CLI 参数得到 PRData:本地模式读 git diff,否则经 gh 取 PR。"""
     if args.local or args.staged or args.diff_range:
-        return fetch_local(staged=args.staged, diff_range=args.diff_range,
-                           title=args.title, body=args.body or "")
+        return fetch_local(
+            staged=args.staged,
+            diff_range=args.diff_range,
+            title=args.title,
+            body=args.body or "",
+        )
     if not args.pr_url:
-        raise PRFetchError("请提供 PR 链接,或用 --local / --staged / --range 走本地模式。")
+        raise PRFetchError(
+            "请提供 PR 链接,或用 --local / --staged / --range 走本地模式。"
+        )
     return fetch_pr(args.pr_url)
 
 
 def _analyze_to_session(pr, on_progress=None):
     """(briefing_text, session):分析 PR 出 briefing 并建会话。on_progress 透传给分析。"""
     ws = workspace_for(pr, on_progress=on_progress)
-    briefing_text = render_briefing(build_briefing_for(pr, on_progress=on_progress, workspace=ws))
-    session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
+    briefing_text = render_briefing(
+        build_briefing_for(pr, on_progress=on_progress, workspace=ws)
+    )
+    session = ChatSession(
+        _CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text
+    )
     return briefing_text, session
 
 
@@ -136,8 +179,24 @@ class _ChatServices:
 
     def interpret(self, text):
         from reviewpilot.resolve import interpret_target
-        # interpret_target 调 llm(字符串),必须用字符串型 complete(而非接收 messages 列表的 chat)
-        return interpret_target(text, llm=partial(complete, stage="analyze"))
+
+        return interpret_target(text)
+
+    def resolve_with_tools(self, text):
+        from reviewpilot.resolve import resolve_with_tools as _resolve_with_tools
+        from reviewpilot.prfetch import list_user_repos, search_repos
+        import json as _json
+
+        def _list(owner):
+            repos = list_user_repos(owner)
+            return _json.dumps(repos, ensure_ascii=False)
+
+        def _search(query):
+            repos = search_repos(query)
+            return _json.dumps(repos, ensure_ascii=False)
+
+        tools = {"list_repos": _list, "search_repos": _search}
+        return _resolve_with_tools(text, tools, partial(chat_tools, stage="analyze"))
 
     def pr_data(self, ref):
         return fetch_pr(ref)
@@ -147,24 +206,39 @@ class _ChatServices:
 
     def list_prs(self, repo):
         from reviewpilot.prfetch import list_open_prs
+
         return list_open_prs(repo)
 
     def repo_latest(self, repo):
         from reviewpilot.prfetch import fetch_repo_latest
+
         return fetch_repo_latest(repo)
 
     def search_repos(self, query, owner=""):
         from reviewpilot.prfetch import search_repos
+
         return search_repos(query, owner)
+
+    def repo_exists(self, owner, repo):
+        from reviewpilot.prfetch import repo_exists
+
+        return repo_exists(owner, repo)
+
+    def repo_readme(self, owner, repo):
+        from reviewpilot.prfetch import repo_readme
+
+        return repo_readme(owner, repo)
 
 
 def _run_chat_ui(initial: str = None) -> None:
     """tty 下启全屏 TUI(先进界面、再在里面给 PR/repo,看分析过程);否则回退普通多轮。
     initial:可选的初始文本(命令行传了 PR/repo/--local 时自动开跑)。"""
     import sys
+
     if sys.stdin.isatty():
         try:
             from reviewpilot.tui_app import ReviewPilotApp
+
             ReviewPilotApp(_ChatServices(), _analyze_to_session, initial=initial).run()
             return
         except Exception as exc:  # TUI 不可用则降级
@@ -206,7 +280,7 @@ def main(argv=None):
     try:
         if args.cmd == "review":
             pr = _pr_from_args(args)
-            ws = workspace_for(pr)   # 取只读工作区 → 走 ReAct Review Loop(失败则回退)
+            ws = workspace_for(pr)  # 取只读工作区 → 走 ReAct Review Loop(失败则回退)
             print(render_briefing(build_briefing_for(pr, workspace=ws)))
         elif args.cmd == "chat":
             initial = None  # chat 可不带 PR:进 TUI 后再输入
@@ -222,10 +296,14 @@ def main(argv=None):
         elif args.cmd == "eval":
             from reviewpilot.evaluate import load_samples, evaluate
             from reviewpilot.llm import chat_tools
-            result = evaluate(load_samples(args.samples), llm=_EVAL_LLM,
-                              apply_guard=not args.no_guard,
-                              chat_tools=partial(chat_tools, stage="eval"),
-                              chat=partial(chat, stage="eval"))
+
+            result = evaluate(
+                load_samples(args.samples),
+                llm=_EVAL_LLM,
+                apply_guard=not args.no_guard,
+                chat_tools=partial(chat_tools, stage="eval"),
+                chat=partial(chat, stage="eval"),
+            )
             print(result.summary())
     except PRFetchError as exc:
         print(f"⚠️  {exc}")

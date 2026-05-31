@@ -3,6 +3,7 @@
 界面立刻启动;拉取 PR、分析、追问全部走后台线程,进度实时回报到对话区。
 三类消息视觉区分:用户消息 / pilot 思考·进度 / pilot 最终回复。
 """
+
 import asyncio
 import os
 import shlex
@@ -40,7 +41,7 @@ class ReviewPilotApp(App):
         self._services = services
         self._analyze_fn = analyze_fn
         self._initial = initial
-        self._pending = None      # 待用户回复的状态:pick(选PR)/ confirm(y-n)
+        self._pending = None  # 待用户回复的状态:pick(选PR)/ confirm(y-n)
         self._session = None
         self._pr = None
         self._briefing_text = None
@@ -53,12 +54,16 @@ class ReviewPilotApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="log")
-        yield Input(placeholder="粘贴 GitHub PR 链接,或输入 local / local main...HEAD", id="ask")
+        yield Input(
+            placeholder="粘贴 GitHub PR 链接,或输入 local / local main...HEAD", id="ask"
+        )
         yield Footer()
 
     async def on_mount(self) -> None:
-        await self._say("欢迎 👋 粘贴一个 **GitHub PR 链接**,或输入 `local`"
-                        "(也可 `local main...HEAD` / `local --staged`)评审本地改动。")
+        await self._say(
+            "欢迎 👋 粘贴一个 **GitHub PR 链接**,或输入 `local`"
+            "(也可 `local main...HEAD` / `local --staged`)评审本地改动。"
+        )
         self.query_one("#ask", Input).focus()
         if self._initial:
             await self._user(self._initial)
@@ -71,8 +76,10 @@ class ReviewPilotApp(App):
         content = f"**{label}**\n\n{text}"
         # Textual Markdown can deadlock under run_test while mounting nested widgets.
         # The real TUI keeps Markdown/link behavior; headless tests use plain Static.
-        widget = Static(content, classes=css) if self.is_headless else Markdown(
-            content, classes=css, open_links=False
+        widget = (
+            Static(content, classes=css)
+            if self.is_headless
+            else Markdown(content, classes=css, open_links=False)
         )
         await log.mount(widget)
         log.scroll_end(animate=False)
@@ -83,13 +90,13 @@ class ReviewPilotApp(App):
         inp.value = event.href
         inp.focus()
 
-    async def _user(self, text: str) -> None:       # 用户消息
+    async def _user(self, text: str) -> None:  # 用户消息
         await self._mount("你", text, "msg-user")
 
-    async def _think(self, text: str) -> None:      # 思考 / 进度
+    async def _think(self, text: str) -> None:  # 思考 / 进度
         await self._mount("分析中", f"_{text}_", "msg-thinking")
 
-    async def _say(self, text: str) -> None:        # 最终回复
+    async def _say(self, text: str) -> None:  # 最终回复
         await self._mount("ReviewPilot", text, "msg-final")
 
     def _set_busy(self, busy: bool, placeholder: str) -> None:
@@ -150,7 +157,9 @@ class ReviewPilotApp(App):
             await self._say(f"命令失败:{exc}")
 
     async def _cmd_help(self, args: list[str]) -> None:
-        lines = [f"- `{name}`: {desc}" for name, (desc, _handler) in self._commands().items()]
+        lines = [
+            f"- `{name}`: {desc}" for name, (desc, _handler) in self._commands().items()
+        ]
         await self._say("\n".join(lines))
 
     async def _cmd_model(self, args: list[str]) -> None:
@@ -161,12 +170,18 @@ class ReviewPilotApp(App):
             )
             return
         if len(args) != 2 or args[0] not in {"chat", "analyze"}:
-            await self._say("用法:`/model` 或 `/model chat <model>` / `/model analyze <model>`")
+            await self._say(
+                "用法:`/model` 或 `/model chat <model>` / `/model analyze <model>`"
+            )
             return
         stage, model = args
         env_name = f"RP_MODEL_{stage.upper()}"
         os.environ[env_name] = model
-        note = "analyze 切换不会自动重跑当前 briefing。" if stage == "analyze" else "后续追问将使用新 chat 模型。"
+        note = (
+            "analyze 切换不会自动重跑当前 briefing。"
+            if stage == "analyze"
+            else "后续追问将使用新 chat 模型。"
+        )
         await self._say(f"已切换 {stage} 模型为 `{model}`。\n\n{note}")
 
     async def _cmd_clear(self, args: list[str]) -> None:
@@ -229,9 +244,12 @@ class ReviewPilotApp(App):
             if not rows:
                 await self._say("暂无已保存会话。")
                 return
-            await self._say("\n".join(
-                f"- `{row['id']}` {row['pr_ref']} {row['created_at']}" for row in rows
-            ))
+            await self._say(
+                "\n".join(
+                    f"- `{row['id']}` {row['pr_ref']} {row['created_at']}"
+                    for row in rows
+                )
+            )
             return
         state = load_session(args[0])
         pr = PRData(
@@ -296,34 +314,43 @@ class ReviewPilotApp(App):
         if target.kind == "pr":
             await self._fetch_and_analyze(lambda: self._services.pr_data(target.value))
         elif target.kind == "local":
-            await self._fetch_and_analyze(lambda: self._services.local_data(target.value))
+            await self._fetch_and_analyze(
+                lambda: self._services.local_data(target.value)
+            )
         elif target.kind == "repo":
             await self._enter_repo(target.value)
-        elif target.kind == "search":
-            await self._search(target.value, target.candidate or "")
+        elif target.kind == "fuzzy":
+            await self._resolve_react(target.value or text)
         else:  # unknown
-            await self._say("无法识别。请给 PR 链接、`owner/repo#N`、repo 链接,或 `local`。")
+            await self._say(
+                "无法识别。请给 PR 链接、`owner/repo#N`、repo 链接,或 `local`。"
+            )
             self._set_busy(False, "粘贴 PR / repo 链接,或 local")
 
-    async def _search(self, query: str, owner: str) -> None:
-        await self._think(f"联网搜索仓库:{(query + ' ' + owner).strip()}…")
+    async def _resolve_react(self, text: str) -> None:
+        """ReAct 仓库发现:LLM 用工具探索 GitHub → 验证 → 确认对话(mini chat)。"""
+        await self._think("探索 GitHub…")
         try:
-            repos = await asyncio.to_thread(self._services.search_repos, query, owner)
+            target = await asyncio.to_thread(self._services.resolve_with_tools, text)
         except Exception as exc:
-            await self._say(f"搜索失败:{exc}")
+            await self._say(f"探索失败:{exc}")
             self._set_busy(False, "换个关键词,或贴链接")
             return
-        if not repos:
-            await self._say("没搜到匹配的仓库。换个关键词,或直接贴 PR/repo 链接。")
+        if target.kind != "repo" or not target.value:
+            await self._say("没找到匹配的仓库。换个关键词,或直接贴 PR/repo 链接。")
             self._set_busy(False, "换个关键词,或贴链接")
             return
-        lines = [
-            f"{i}. {r['full_name']}" + (f" — {r['description'][:60]}" if r.get("description") else "")
-            for i, r in enumerate(repos, 1)
-        ]
-        self._pending = {"kind": "pick_repo", "repos": repos}
-        await self._say("搜到这些仓库:\n\n" + "\n".join(lines) + "\n\n输入编号选择,或贴链接。")
-        self._set_busy(False, "输入编号选择仓库")
+        # 验证仓库存在并拿描述
+        repo = target.value
+        owner, _, repo_name = repo.partition("/")
+        info = await asyncio.to_thread(self._services.repo_exists, owner, repo_name)
+        desc = (info or {}).get("description", "")
+        self._pending = {"kind": "confirm_repo", "repo": repo, "desc": desc}
+        hint = f" — {desc}" if desc else ""
+        await self._say(
+            f'找到 `{repo}`{hint}\n\n是这个吗? 输 y 确认 / n 重新搜 / 或追问(如"这讲了啥")。'
+        )
+        self._set_busy(False, "y 确认 / n 否 / 追问")
 
     async def _enter_repo(self, repo: str) -> None:
         await self._think(f"列出 {repo} 的 open PR…")
@@ -343,8 +370,11 @@ class ReviewPilotApp(App):
             for i, pr in enumerate(prs, 1)
         ]
         self._pending = {"kind": "pick", "repo": repo, "prs": prs}
-        await self._say(f"`{repo}` 的 open PR:\n\n" + "\n".join(lines)
-                        + "\n\n输入编号选择,或直接贴别的链接。")
+        await self._say(
+            f"`{repo}` 的 open PR:\n\n"
+            + "\n".join(lines)
+            + "\n\n输入编号选择,或直接贴别的链接。"
+        )
         self._set_busy(False, "输入编号选择 PR")
 
     async def _fetch_and_analyze(self, fetch_callable) -> None:
@@ -356,7 +386,9 @@ class ReviewPilotApp(App):
         try:
             pr = await asyncio.to_thread(fetch_callable)
             await self._think(f"已获取 {pr.pr_ref},开始分析…")
-            briefing_text, session = await asyncio.to_thread(self._analyze_fn, pr, progress)
+            briefing_text, session = await asyncio.to_thread(
+                self._analyze_fn, pr, progress
+            )
         except Exception as exc:
             await self._say(f"分析失败:{exc}")
             self._set_busy(False, "换一个链接,或输入 local")
@@ -372,16 +404,79 @@ class ReviewPilotApp(App):
     async def _resume_pending(self, text: str) -> None:
         pending = self._pending
         self._pending = None
-        if pending["kind"] == "pick_repo":
-            repos = pending["repos"]
-            sel = text.strip()
-            chosen = repos[int(sel) - 1] if sel.isdigit() and 1 <= int(sel) <= len(repos) else None
-            if chosen is None:
-                self._pending = pending
-                await self._say("无效编号,请重新输入,或贴链接。")
-                self._set_busy(False, "输入编号选择仓库")
+        if pending["kind"] == "confirm_repo":
+            ans = text.strip().lower()
+            if ans in ("y", "yes"):
+                await self._enter_repo(pending["repo"])
                 return
-            await self._enter_repo(chosen["full_name"])
+            if ans in ("n", "no"):
+                await self._say("请换个描述重新搜索,或直接贴 PR/repo 链接。")
+                self._set_busy(False, "换个关键词,或贴链接")
+                return
+            # 追问:chat LLM + repo_readme 工具,让它真去看仓库
+            self._pending = pending
+            self._set_busy(True, "了解中…")
+            try:
+                from reviewpilot.llm import chat_tools, chat
+
+                repo = pending["repo"]
+                owner, _, repo_name = repo.partition("/")
+                desc = pending.get("desc", "")
+                confirm_tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "repo_readme",
+                            "description": "读取仓库 README 文件内容,了解仓库用途、技术栈、使用方法。",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "owner": {"type": "string"},
+                                    "repo": {"type": "string"},
+                                },
+                                "required": ["owner", "repo"],
+                            },
+                        },
+                    }
+                ]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"用户正在确认仓库 `{repo}`。描述:'{desc}'。"
+                        "回答用户对仓库的问题;描述不够时可调 repo_readme 看 README。"
+                        "不要催问是否确认,只回答问题(≤150字)。",
+                    },
+                    {"role": "user", "content": text.strip()},
+                ]
+                out = await asyncio.to_thread(
+                    chat_tools, messages, confirm_tools, stage="chat"
+                )
+                calls = out["calls"]
+                if calls:
+                    messages.append(out["assistant_msg"])
+                    for c in calls:
+                        if c["name"] == "repo_readme":
+                            a = c["args"]
+                            raw = await asyncio.to_thread(
+                                self._services.repo_readme,
+                                a.get("owner", owner),
+                                a.get("repo", repo_name),
+                            )
+                            content = raw if raw else "(该仓库没有 README)"
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": c["id"],
+                                    "content": content[:2000],
+                                }
+                            )
+                    reply = await asyncio.to_thread(chat, messages, stage="chat")
+                else:
+                    reply = out["content"]
+                await self._say(reply)
+            except Exception as exc:
+                await self._say(f"回答失败:{exc}")
+            self._set_busy(False, "y 确认 / n 否 / 追问")
             return
         # pick (PR)
         prs, repo = pending["prs"], pending["repo"]
