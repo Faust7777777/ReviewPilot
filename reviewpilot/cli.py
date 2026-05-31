@@ -18,11 +18,12 @@ _EVAL_LLM = partial(complete, stage="eval")
 
 
 def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None) -> Briefing:
+    trace = None
     if workspace is not None:
         # 受限只读 Review Loop:模型按需 read_file/search 取证再出 finding(harness 主求解面)
         from reviewpilot.review_loop import run_review_loop
         from reviewpilot.llm import chat_tools
-        findings, _trace = run_review_loop(
+        findings, trace = run_review_loop(
             pr.diff, pr.title, pr.body, pr.issue, workspace,
             chat_tools=partial(chat_tools, stage="analyze"),
             chat=partial(chat, stage="analyze"),
@@ -31,7 +32,7 @@ def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None) -
         findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
                                    on_progress=on_progress)
     findings = apply_guardrail(findings, diff=pr.diff)
-    summary, inspected, limitations = build_inspection(pr.diff, findings)
+    summary, inspected, limitations = build_inspection(pr.diff, findings, trace=trace)
     return Briefing(pr_ref=pr.pr_ref, findings=findings,
                     summary=summary, inspected=inspected, limitations=limitations)
 

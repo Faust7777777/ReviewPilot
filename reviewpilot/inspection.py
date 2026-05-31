@@ -9,7 +9,21 @@ from reviewpilot.models import Finding, FindingKind, InspectionCheck
 _LIMITATIONS = ["仅基于 PR 描述与 diff", "未运行测试", "未读取完整仓库上下文"]
 
 
-def build_inspection(diff: str, findings: list[Finding]) -> tuple[str, list[InspectionCheck], list[str]]:
+def _summarize_trace(trace) -> str:
+    reads = list(dict.fromkeys(t["args"].get("path", "") for t in trace
+                               if t.get("tool") == "read_file" and t["args"].get("path")))
+    searches = list(dict.fromkeys(t["args"].get("query", "") for t in trace
+                                  if t.get("tool") == "search" and t["args"].get("query")))
+    parts = []
+    if reads:
+        parts.append("读取 " + "、".join(reads))
+    if searches:
+        parts.append("搜索 " + "、".join(f"“{s}”" for s in searches))
+    return ";".join(parts)
+
+
+def build_inspection(diff: str, findings: list[Finding],
+                     trace=None) -> tuple[str, list[InspectionCheck], list[str]]:
     from reviewpilot.analyzer import _should_skip, DEFAULT_MAX_FILES
     all_blocks = split_diff_by_file(diff)
     files = [f for f, _ in all_blocks if f]
@@ -33,6 +47,10 @@ def build_inspection(diff: str, findings: list[Finding]) -> tuple[str, list[Insp
         InspectionCheck(dimension="接口影响",
                         note="见风险项" if n_risk else "未发现签名/调用约定变化"),
     ]
+    if trace:  # ReAct 取证过程:展示模型实际读了哪些文件/搜了什么(可见可信)
+        summary_t = _summarize_trace(trace)
+        if summary_t:
+            inspected.insert(1, InspectionCheck(dimension="取证过程", note=summary_t))
     if findings:
         summary = f"发现 {len(findings)} 条可报告项(见下);其余维度已检查。"
     else:
