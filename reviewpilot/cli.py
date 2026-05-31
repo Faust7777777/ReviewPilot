@@ -17,13 +17,40 @@ _CHAT_LLM = partial(chat, stage="chat")
 _EVAL_LLM = partial(complete, stage="eval")
 
 
-def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None) -> Briefing:
-    findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
-                               on_progress=on_progress)
+def build_briefing_for(pr, llm=_ANALYZE_LLM, on_progress=None, workspace=None) -> Briefing:
+    if workspace is not None:
+        # 受限只读 Review Loop:模型按需 read_file/search 取证再出 finding(harness 主求解面)
+        from reviewpilot.review_loop import run_review_loop
+        from reviewpilot.llm import chat_tools
+        findings, _trace = run_review_loop(
+            pr.diff, pr.title, pr.body, pr.issue, workspace,
+            chat_tools=partial(chat_tools, stage="analyze"),
+            chat=partial(chat, stage="analyze"),
+            on_progress=on_progress)
+    else:
+        findings = analyze_chunked(pr.diff, pr.title, pr.body, pr.issue, llm=llm,
+                                   on_progress=on_progress)
     findings = apply_guardrail(findings, diff=pr.diff)
     summary, inspected, limitations = build_inspection(pr.diff, findings)
     return Briefing(pr_ref=pr.pr_ref, findings=findings,
                     summary=summary, inspected=inspected, limitations=limitations)
+
+
+def workspace_for(pr, on_progress=None):
+    """为评审取得只读工作区:local 用当前目录;PR/repo 浅 clone。失败返回 None(回退 analyze_chunked)。"""
+    from reviewpilot.workspace import RepoWorkspace
+    ref = pr.pr_ref or ""
+    try:
+        if ref.startswith("local"):
+            return RepoWorkspace(".")
+        repo = ref.split("#")[0].split("@")[0].strip()  # owner/repo#N 或 owner/repo@sha
+        if "/" in repo:
+            if on_progress:
+                on_progress(f"浅 clone {repo} 供取证…")
+            return RepoWorkspace.clone(repo)
+    except Exception:
+        return None
+    return None
 
 
 def build_briefing(url: str, llm=_ANALYZE_LLM, runner=_default_runner) -> Briefing:
@@ -94,7 +121,8 @@ def _pr_from_args(args):
 
 def _analyze_to_session(pr, on_progress=None):
     """(briefing_text, session):分析 PR 出 briefing 并建会话。on_progress 透传给分析。"""
-    briefing_text = render_briefing(build_briefing_for(pr, on_progress=on_progress))
+    ws = workspace_for(pr, on_progress=on_progress)
+    briefing_text = render_briefing(build_briefing_for(pr, on_progress=on_progress, workspace=ws))
     session = ChatSession(_CHAT_LLM, pr.diff, pr.title, pr.body, pr.issue, briefing_text)
     return briefing_text, session
 
@@ -173,7 +201,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.cmd == "review":
-            print(render_briefing(build_briefing_for(_pr_from_args(args))))
+            pr = _pr_from_args(args)
+            ws = workspace_for(pr)   # 取只读工作区 → 走 ReAct Review Loop(失败则回退)
+            print(render_briefing(build_briefing_for(pr, workspace=ws)))
         elif args.cmd == "chat":
             initial = None  # chat 可不带 PR:进 TUI 后再输入
             if args.diff_range:
